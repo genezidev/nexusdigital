@@ -36,6 +36,6 @@ export default defineConfig({
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",
-    env: { AUTH_SIGNIN_RATE_MAX: "1000" },
+    env: { AUTH_SIGNIN_RATE_MAX: "1000", AUTH_SIGNIN_EMAIL_MAX: "100000", AUTH_SIGNIN_EMAIL_GLOBAL_MAX: "100000" },
   },
 });

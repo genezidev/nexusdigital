@@ -1,9 +1,11 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import type { NextRequest } from "next/server";
 import type { z } from "zod";
 import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { BadRequestError, ForbiddenError, TooManyRequestsError, ValidationError } from "@/server/errors";
+import { resolveClientIp } from "@/server/http/client-ip";
 import { consumeRateLimit } from "@/server/http/rate-limit";
 import { errorResponse, isNextControlFlow, newRequestId } from "@/server/http/respond";
 
@@ -45,16 +47,29 @@ export async function parseBody<S extends z.ZodType>(req: Request, schema: S): P
   return parsed.data;
 }
 
-/** IP do cliente: so confia em x-forwarded-for quando TRUST_PROXY=true (atras de proxy confiavel). */
-export function clientIp(req: Request): string {
-  if (getServerEnv().TRUST_PROXY !== "true") return "no-trusted-ip";
-  const first = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return first || "no-trusted-ip";
+/**
+ * IP do cliente confiavel e validado, ou null (sem proxy confiavel, cabecalho ausente, invalido, ambiguo ou
+ * grande demais). Mesma logica das rotas de autenticacao (client-ip.ts).
+ */
+export function clientIpFromRequest(req: Request): string | null {
+  const env = getServerEnv();
+  return resolveClientIp(req.headers, { trust: env.TRUST_PROXY === "true", header: env.TRUSTED_IP_HEADER, trustedProxies: env.TRUSTED_PROXIES });
 }
 
-/** Limite de tentativas em banco para handlers proprios (rotas publicas por token). */
-export async function limitRequests(req: Request, name: string, rule: { windowSeconds: number; max: number }): Promise<void> {
-  const result = await consumeRateLimit(getDb(), `app:${name}:${clientIp(req)}`, rule.windowSeconds, rule.max);
+/**
+ * Limite de tentativas em banco para handlers proprios (rotas publicas por token). Com IP confiavel o balde e
+ * por IP; sem IP, e do `identifier` (ex.: o token); sem nenhum dos dois nao ha balde (nunca existe balde global).
+ */
+export async function limitRequests(
+  req: Request,
+  name: string,
+  rule: { windowSeconds: number; max: number },
+  identifier?: string,
+): Promise<void> {
+  const ip = clientIpFromRequest(req);
+  const key = ip ? `app:${name}:ip:${ip}` : identifier ? `app:${name}:id:${createHash("sha256").update(identifier.slice(0, 512)).digest("hex")}` : null;
+  if (!key) return;
+  const result = await consumeRateLimit(getDb(), key, rule.windowSeconds, rule.max);
   if (!result.allowed) throw new TooManyRequestsError(result.retryAfterSeconds);
 }
 

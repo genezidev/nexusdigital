@@ -1,6 +1,7 @@
 import { getAuth } from "@/server/auth/instance";
 import { isEmailDeliveryAvailable } from "@/server/config/email";
-import { json, newRequestId } from "@/server/http/respond";
+import { guardAuthRequest } from "@/server/http/auth-guard";
+import { errorResponse, isNextControlFlow, json, newRequestId } from "@/server/http/respond";
 
 // Porta de entrada do Better Auth. Lista de permissao: so as rotas que a interface usa chegam ao
 // Better Auth; o resto (inclusive /admin/* do plugin, que pularia a auditoria do app) responde 404.
@@ -26,9 +27,17 @@ async function handle(req: Request): Promise<Response> {
       requestId,
     );
   }
-  const response = await getAuth().handler(req);
-  response.headers.set("Cache-Control", "no-store");
-  return response;
+  try {
+    // Limite de tentativas (IP validado e e-mail) e saneamento do cabecalho de IP antes do Better Auth.
+    const guarded = await guardAuthRequest(req, path);
+    const response = await getAuth().handler(guarded.request);
+    await guarded.finish(response.status);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  } catch (error) {
+    if (isNextControlFlow(error)) throw error;
+    return errorResponse(error, requestId);
+  }
 }
 
 export const GET = handle;

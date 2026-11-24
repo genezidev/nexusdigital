@@ -48,7 +48,7 @@ Atores: ADMIN (dono da agência), STAFF (equipe, só clientes atribuídos), CLIE
 - Convite expirado, já usado ou com token inválido: mensagem clara, sem revelar se o e-mail existe.
 - E-mail duplicado: conflito tratado (409), sem criar usuário repetido.
 - Senha fraca ou curta: erro inline.
-- Muitas tentativas de login ou reset: limite de tentativas (429).
+- Muitas tentativas de login ou reset: limite de tentativas (429), por IP confiável e por e-mail, sem balde global (um anônimo não bloqueia o login dos outros; `docs/proxy-e-ip.md`).
 - E-mail (SMTP) indisponível: o convite fica gerado e o admin pode copiar o link manualmente; nunca mostrar sucesso falso.
 - Usuário sem permissão: acesso negado sem stack trace.
 
@@ -76,7 +76,7 @@ Tabelas desta entrega: users, clients, client_members, invitations, reset_tokens
 - Prazo de validade do convite: 7 dias. Senha mínima: 12 caracteres.
 - MFA do admin fica para a fase 5.
 - Envio de e-mail por SMTP é opcional nesta fase; o admin pode copiar o link do convite.
-- Usuário inicial admin criado por seed local com dados fictícios; em produção, criado por comando controlado.
+- Usuário inicial admin criado por seed local com dados fictícios; em produção, criado por `app/scripts/provisionar-producao.mjs` (confirmação explícita, ambiente declarado, senha por ambiente ou prompt; `docs/runbook-producao.md`).
 
 ## Referências e armadilhas
 

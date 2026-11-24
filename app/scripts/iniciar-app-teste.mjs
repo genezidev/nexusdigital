@@ -36,9 +36,14 @@ const filho = spawn(process.execPath, [next, "start", "-p", porta, "-H", "127.0.
     NODE_ENV: "production",
     DATABASE_URL: url,
     APP_URL: `http://127.0.0.1:${porta}`,
-    // Os testes enviam x-forwarded-for proprio para isolar o limite de tentativas por teste.
-    TRUST_PROXY: "true",
+    // Os testes enviam x-real-ip proprio (o proxy real o sobrescreve) para isolar o limite por teste.
+    // NEXO_TEST_* permite subir variantes (sem proxy confiavel, com TRUSTED_PROXIES e outro cabecalho).
+    TRUST_PROXY: process.env.NEXO_TEST_TRUST_PROXY ?? "true",
+    TRUSTED_IP_HEADER: process.env.NEXO_TEST_IP_HEADER ?? "x-real-ip",
+    TRUSTED_PROXIES: process.env.NEXO_TEST_TRUSTED_PROXIES ?? "",
     AUTH_SIGNIN_RATE_MAX: process.env.AUTH_SIGNIN_RATE_MAX ?? "5",
+    AUTH_SIGNIN_EMAIL_MAX: process.env.AUTH_SIGNIN_EMAIL_MAX ?? "10",
+    AUTH_SIGNIN_EMAIL_GLOBAL_MAX: process.env.AUTH_SIGNIN_EMAIL_GLOBAL_MAX ?? "100",
   },
 });
 const encerrar = () => filho.kill();

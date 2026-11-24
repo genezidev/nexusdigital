@@ -138,6 +138,7 @@ model RateLimit {
   lastRequest BigInt @map("last_request")
 
   @@unique([key])
+  @@index([lastRequest])
   @@map("rate_limits")
 }
 

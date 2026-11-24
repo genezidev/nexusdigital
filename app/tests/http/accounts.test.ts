@@ -186,7 +186,7 @@ describe("login, cookies e limite de tentativas (P4)", () => {
     }
     expect(statuses.slice(0, 5).every((s) => s === 401)).toBe(true);
     expect(statuses.slice(5)).toEqual([429, 429]);
-    const rows = await ownerDb.rateLimit.findMany({ where: { key: { startsWith: `${ip}|` } } });
+    const rows = await ownerDb.rateLimit.findMany({ where: { key: `app:auth-ip:/sign-in/email:${ip}` } });
     expect(rows.length).toBe(1);
     // Outro IP nao e afetado (o limite e por IP).
     expect((await http("/api/auth/sign-in/email", { method: "POST", body: { email: w.ownerA.email, password: TEST_PASSWORD } })).status).toBe(200);

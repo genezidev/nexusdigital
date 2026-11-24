@@ -12,8 +12,6 @@ export function getAuth(): Auth {
     globalForAuth.__nexoAuth = createAuth(getDb(), {
       secret: env.BETTER_AUTH_SECRET,
       baseURL: env.APP_URL,
-      trustForwardedFor: env.TRUST_PROXY === "true",
-      signInRateLimit: { window: 60, max: env.AUTH_SIGNIN_RATE_MAX },
     });
   }
   return globalForAuth.__nexoAuth;

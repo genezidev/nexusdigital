@@ -143,3 +143,63 @@ Formato inspirado no MADR (https://github.com/adr/madr, MIT ou CC0).
 
 **Fontes:** `app/node_modules/next/dist/docs/` (Proxy, Authentication with Cache Components, loading.js: status codes), código do Better Auth 1.7.27 em `node_modules/better-auth/dist/api/rate-limiter` e `middlewares/origin-check`, conferidos em 2026-11-24.
 
+
+## D-0007: auditoria imutavel e usuario que o app nao apaga (B-1)
+
+- Data: 2026-11-24 · Estado: aceita pelo agente de servidor a partir da revisao de seguranca; confirmacao do dono pendente (aplicada so em `nexo_dev` e `nexo_test`)
+- Quem decidiu: agente de servidor, a partir de D-0004
+
+**Contexto:** o app nao tem UPDATE nem DELETE em `audit_logs`, mas tinha DELETE em `users`, e a FK `audit_logs_actor_id_fkey ON DELETE SET NULL` reescrevia `actor_id` das linhas de auditoria (provado: UPDATE direto deu `permission denied`; DELETE do usuario anulou o autor). O mesmo vale para `client_id` se um dono do banco apagasse um cliente.
+
+**Opcoes consideradas:**
+- So `REVOKE DELETE ON users FROM nexo_app`: a favor, simples; contra, o dono do banco (migrations, correcoes manuais) ainda reescreve a trilha sem querer.
+- So gatilho em `audit_logs`: a favor, protege contra qualquer papel e contra a acao referencial; contra, deixaria o app com um privilegio que ninguem usa.
+- Os dois (escolhida): privilegio minimo no app e imutabilidade no proprio banco.
+
+**Escolha:** migration `20261124210000_auditoria_imutavel` (reversao em `app/prisma/rollback/20261124210000_auditoria_imutavel.down.sql`, ensaiada em `nexo_test`: desfez, os dois testes novos falharam, reaplicou e passaram): `REVOKE DELETE ON users FROM nexo_app` e gatilho `BEFORE UPDATE OR DELETE ... FOR EACH ROW` mais `BEFORE TRUNCATE` em `audit_logs`, que levantam excecao (`42501`) para qualquer papel, inclusive nas acoes referenciais. Nenhum fluxo do codigo apaga usuario (conferido por busca em `src/`, `tests/`, `e2e/`, seed e scripts); a pessoa sai por bloqueio (`users.banned`) e participacao revogada.
+
+**Consequencias:**
+- Apagar um usuario ou cliente que tenha linhas de auditoria passa a falhar, mesmo para o dono do banco. Quem precisar mesmo (restauracao, manutencao) usa o backup ou desabilita o gatilho de forma consciente e registrada, fora do app.
+- **LGPD (fase 5):** exclusao ou anonimizacao a pedido do titular **nao pode ser `DELETE FROM users`**. Deve ser `UPDATE` que remove os dados pessoais (nome, e-mail para um valor sem identificacao, `image`, sessoes e contas apagadas, `banned`) e mantem o `id`, de modo que a auditoria continue apontando para um autor anonimizado. Se o titular exigir apagar tambem o conteudo de `audit_logs.diff`, isso precisa de uma funcao propria, revisada e com registro (decisao de LGPD da fase 5), nunca de reabrir `UPDATE`/`DELETE` para o app. O `diff` ja nao guarda senha, token ou hash (`sanitizeDiff`).
+- **Gatilhos `ENABLE ALWAYS` (revisao A-5):** disparam tambem em sessoes com `session_replication_role = replica` (que desligam gatilhos comuns, "ENABLE ORIGIN"). Limite aceito, nao eliminado: superusuario ainda pode `DISABLE TRIGGER`, `DROP TRIGGER` ou usar replicacao logica; e operacao de DDL fora do app e deve ficar no registro de mudancas.
+- Restauracao de backup e `prisma migrate reset` em dev recriam o schema inteiro e nao sao afetados; `TRUNCATE audit_logs` (inclusive em cascata) tambem e recusado.
+
+**Como conferir:** `app/tests/integration/rls.test.ts` (casos "o app nao apaga usuario", "nem o dono do banco reescreve a auditoria" e "ENABLE ALWAYS", com `tgenabled = 'A'` e `session_replication_role = replica`).
+
+## D-0008: IP do cliente e limite de tentativas sem balde global (M-1)
+
+- Data: 2026-11-24 · Estado: aceita pelo agente de servidor; confirmacao do dono pendente. Substitui, para o limite de login, a escolha de D-0006 de usar o limitador do Better Auth.
+- Quem decidiu: agente de servidor, a partir da revisao de seguranca
+
+**Contexto:** com `TRUST_PROXY=false` o Better Auth usava um balde unico `no-trusted-ip` (5 por minuto no login) e o handler proprio devolvia `no-trusted-ip` (10 por minuto no aceite): qualquer anonimo bloqueava o login de todos. Com proxy que acrescenta ao `x-forwarded-for`, o handler proprio usava o PRIMEIRO valor (forjavel) e a chave recebia texto livre. Conferido no codigo do Better Auth 1.7.27 (`@better-auth/core/utils/ip`): sem `trustedProxies` ele so aceita cabecalho de valor unico; sem IP cai no balde unico.
+
+**Escolha:**
+- `TRUST_PROXY` obrigatorio e explicito em producao: o processo encerra na partida (`src/instrumentation.ts`) e `getServerEnv` recusa (`env.ts`).
+- Um unico resolvedor de IP (`src/server/http/client-ip.ts`) para as rotas de autenticacao e para os handlers proprios: cabecalho configuravel (`TRUSTED_IP_HEADER`, padrao `x-real-ip`, que o proxy sobrescreve), `TRUSTED_PROXIES` opcional para cadeias, validacao como IPv4/IPv6, limite de 512 caracteres e 16 saltos, normalizacao (IPv4 mapeado, IPv6 em /64). A requisicao segue ao Better Auth com um cabecalho interno recalculado (`x-nexo-client-ip`; o que o cliente mandar nesse nome e descartado).
+- Limite de tentativas movido para `src/server/http/auth-guard.ts` (o do Better Auth fica desligado). Sem IP confiavel nao existe balde global: fora o login, o balde e do e-mail, do token ou da sessao da propria requisicao. Corpo acima de 8 KB responde 413.
+- **Corpo lido como o Better Auth le (revisao A-1):** nas rotas de login, pedido de redefinicao, redefinicao e troca de senha o corpo precisa ser `application/json` (415 caso contrario; o Better Auth aceita tambem form-urlencoded e `text/plain`, que o guard nao conseguia ler e deixavam a requisicao sem balde). O guard le o corpo uma vez (UTF-8, sem BOM), exige identificador valido (e-mail ou token, inclusive o `?token=` da redefinicao) e responde 400 sem repassar ao Better Auth se faltar, e repassa a ele o JSON canonico, de modo que nao ha diferenca entre o que foi contado e o que foi processado.
+- **Login conta so falhas (revisao A-3, opcao escolhida pelo orquestrador):** antes, o balde por e-mail contava toda tentativa e bloqueava antes da senha: um anonimo trancava o login do ADMIN com ~10 requisicoes por 15 minutos. Agora: (a) a tentativa reserva uma vaga de forma atomica antes (incrementar depois, como pedido, deixaria N requisicoes paralelas passarem pelo limite) e a vaga e devolvida se o Better Auth responder sucesso ou algo que nao seja falha (429, 5xx); falha e 400, 401, 403 ou 422; (b) o balde de falhas e por (e-mail, IP normalizado /64) com 10 falhas em 15 minutos (`AUTH_SIGNIN_EMAIL_MAX`), mais um teto por e-mail de 100 falhas em 15 minutos de qualquer IP (`AUTH_SIGNIN_EMAIL_GLOBAL_MAX`), so contra ataque distribuido; (c) quem ja entrou com sucesso na conta a partir daquele IP (marca por 30 dias) nao e barrado pelo balde (e-mail, IP), so pelo teto. O 429 e identico para conta existente e inexistente. O balde por IP (5 por minuto, toda tentativa) continua.
+- **Limite residual honesto:** um atacante distribuido com 100 ou mais falhas em 15 minutos para o mesmo e-mail ainda pode atrasar o login daquela conta (inclusive o do ADMIN) por ate 15 minutos; mitigacao: MFA do admin na fase 5 e banimento de IP no proxy. Sem IP confiavel (`TRUST_PROXY=false`), todos os anonimos dividem o balde "sem-ip" do e-mail: 10 falhas travam aquele e-mail por 15 minutos para quem nao tem IP conhecido. A marca de "ja entrou deste IP" guarda hash do e-mail e IP por 30 dias na `rate_limits` (dado pessoal; entra na revisao de LGPD).
+- **Retencao (revisao A-4):** a poda remove baldes parados ha mais de 1 hora (maior janela 15 minutos mais folga), marcas de IP conhecido apos 30 dias, em lotes de 1000, por indice em `last_request` (migration `20261124220000_rate_limits_indice`, com reversao ensaiada). Sem IP confiavel a tabela ainda cresce com e-mails distintos, mas so por 1 hora por linha e limitada pelo volume que o proxy deixar passar.
+- Rejeitado: contar a tentativa so depois da resposta (corrida: requisicoes paralelas ultrapassam o limite); reserva antes e devolucao no sucesso tem o mesmo efeito sem corrida. Rejeitado: manter o limitador do Better Auth com `customRules` por funcao (a semantica de IP ausente nao e nossa, e o proximo upgrade pode mudar); rejeitar de vez login sem IP (derrubaria o acesso direto de quem nao tem proxy).
+
+**Consequencias:** limite residual do ataque distribuido (acima), documentado em `docs/proxy-e-ip.md`; o proxy continua responsavel pelo limite de volume e por sobrescrever o cabecalho de IP; a configuracao de Nginx, Caddy e Cloudflare nao foi testada em servidor real.
+
+**Como conferir:** `app/tests/http/rate-limit.test.ts` (quatro instancias do app compilado), `app/tests/integration/rate-limit-prune.test.ts`, `app/src/server/http/client-ip.test.ts`, `app/src/server/config/env.test.ts`.
+
+## D-0009: provisionamento do papel do app e do primeiro ADMIN por script unico (M-3)
+
+- Data: 2026-11-24 · Estado: aceita pelo agente de servidor; confirmacao do dono pendente (nada executado em producao)
+- Quem decidiu: agente de servidor, a partir da revisao de seguranca
+
+**Contexto:** a migration cria `nexo_app` sem senha e cita um script que nao existia; o seed e o `db-migrar` recusam producao. Faltava um caminho seguro para a senha do papel e para o primeiro administrador.
+
+**Escolha:** `app/scripts/provisionar-producao.mjs`, uma transacao com trava consultiva: segredos so por ambiente ou prompt oculto (nunca argumento, nunca impresso, sem ler `.env`), `--ambiente` obrigatorio, confirmacao explicita, destino validado por ambiente (dev/test so local; producao so host em `PROVISIONAR_HOST_PERMITIDO` e nunca `nexo_dev`/`nexo_test`), recusa se ja existe ADMIN (codigo 3), senha forte (12 a 128, mesmo minimo do app, sem palavras comuns, sem e-mail ou nome) e auditoria `admin.provisioned`. A senha do papel e gravada como verificador SCRAM calculado no cliente, para o texto nao aparecer em log de SQL do servidor.
+
+**Revisao A-2 e A-6:** a URL do banco e validada pela sintaxe WHATWG e tambem pelo que o driver `pg` vai usar para conectar (o `pg` deixa `?host=`, `?port=`, `?hostaddr=` e `?options=` sobrescreverem a URL); qualquer query alem de `sslmode` e recusada. A checagem de senha rejeita as piores e padroes obvios (palavras comuns, meses e estacoes, sequencias de teclado, substituicoes como `P@ssw0rd`, palavra + numero); **nao garante senha forte**: use um gerenciador de senhas.
+
+**Comentario da migration `20261124151100`:** cita `scripts/preparar-papel-app.mjs`, que nao existe. Corrigir o comentario muda o checksum da migration ja aplicada (o `migrate status` nao acusa, mas o checksum em `_prisma_migrations` diverge e o `migrate dev` reclamaria); por isso a correcao foi revertida e o nome certo (`provisionar-producao.mjs`) fica so na documentacao (`docs/runbook-producao.md`).
+
+**Consequencias:** o dono do banco precisa ignorar RLS para gravar a auditoria (superusuario ou `BYPASSRLS`); em caso contrario o script falha sem gravar nada. Ordem e comandos em `docs/runbook-producao.md`.
+
+**Como conferir:** `app/tests/integration/provisionar.test.ts` (bancos temporarios com as migrations reais).

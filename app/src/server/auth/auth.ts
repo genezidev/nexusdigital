@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { admin } from "better-auth/plugins";
+import { INTERNAL_IP_HEADER } from "@/server/http/client-ip";
 import { systemContextForSession } from "@/server/authorization/context";
 import type { Db } from "@/server/db/client";
 import { withSystem } from "@/server/db/scope";
@@ -11,10 +12,6 @@ export interface AuthOptions {
   baseURL: string;
   /** Entrega do link de redefinicao. Sem SMTP configurado, deve falhar (nunca sucesso falso). */
   sendResetPassword?: (data: { email: string; url: string; token: string }) => Promise<void>;
-  /** Ligue so atras de um proxy reverso que sobrescreve x-forwarded-for (senao o cabecalho e forjavel). */
-  trustForwardedFor?: boolean;
-  /** Janela e maximo de tentativas de login (padrao: 5 por 60 s por IP). */
-  signInRateLimit?: { window: number; max: number };
 }
 
 // Better Auth 1.7: e-mail e senha, SEM cadastro publico (so convite), ids UUID, token de
@@ -27,7 +24,6 @@ export interface AuthOptions {
 // Sessao no banco e sem cookie cache: sessao revogada ou conta bloqueada perde acesso na requisicao seguinte.
 export function createAuth(db: Db, options: AuthOptions) {
   const origin = new URL(options.baseURL).origin;
-  const signIn = options.signInRateLimit ?? { window: 60, max: 5 };
   return betterAuth({
     secret: options.secret,
     baseURL: options.baseURL,
@@ -40,22 +36,13 @@ export function createAuth(db: Db, options: AuthOptions) {
       disableOriginCheck: false,
       disableCSRFCheck: false,
       defaultCookieAttributes: { httpOnly: true, sameSite: "lax", path: "/" },
-      ipAddress: { ipAddressHeaders: options.trustForwardedFor ? ["x-forwarded-for"] : [] },
+      // O IP gravado na sessao vem so do cabecalho interno, que o app recalcula (http/auth-guard.ts e client-ip.ts)
+      // a partir do cabecalho que o proxy define; o que o cliente mandar nesse nome e descartado.
+      ipAddress: { ipAddressHeaders: [INTERNAL_IP_HEADER] },
     },
-    // Limite de tentativas com armazenamento em banco (tabela rate_limits, migration 20261124200000).
-    // Ligado em qualquer ambiente (o padrao do Better Auth so liga em producao).
-    rateLimit: {
-      enabled: true,
-      storage: "database",
-      window: 10,
-      max: 100,
-      customRules: {
-        "/sign-in/email": signIn,
-        "/request-password-reset": { window: 60, max: 3 },
-        "/reset-password": { window: 60, max: 5 },
-        "/change-password": { window: 60, max: 5 },
-      },
-    },
+    // O limite de tentativas NAO e do Better Auth: o dele cai num balde unico "no-trusted-ip" quando nao acha o
+    // IP (M-1). Quem limita e src/server/http/auth-guard.ts (IP validado, e-mail, sem balde global).
+    rateLimit: { enabled: false },
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,

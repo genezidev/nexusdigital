@@ -2,9 +2,15 @@ import { randomInt } from "node:crypto";
 import { TEST_PASSWORD } from "../../integration/helpers/world";
 
 export const BASE = "http://127.0.0.1:3100";
+/** Variante sem proxy confiavel (TRUST_PROXY=false). */
+export const BASE_NO_PROXY = "http://127.0.0.1:3101";
+/** Variante com TRUSTED_PROXIES e cabecalho x-forwarded-for (cadeia). */
+export const BASE_CHAIN = "http://127.0.0.1:3102";
+/** Variante com limites baixos de falhas por e-mail (3 por e-mail e IP, 6 por e-mail no total) e IP livre. */
+export const BASE_LOW = "http://127.0.0.1:3103";
 export { TEST_PASSWORD };
 
-/** IP unico por chamada: o app de teste confia em x-forwarded-for (TRUST_PROXY) e isola o limite por IP. */
+/** IP unico por chamada: o app de teste confia em x-real-ip (TRUST_PROXY=true, como atras do proxy) e isola o limite por IP. */
 export function uniqueIp(): string {
   return `10.${randomInt(1, 250)}.${randomInt(1, 250)}.${randomInt(1, 250)}`;
 }
@@ -22,21 +28,32 @@ export interface Opts {
   body?: unknown;
   origin?: string | null;
   ip?: string;
+  /** Instancia do app (padrao BASE). */
+  base?: string;
+  /** Corpo cru (bytes ou texto) e Content-Type exato; contentType null = sem cabecalho. */
+  rawBody?: string | Uint8Array;
+  contentType?: string | null;
+  /** Nao envia x-real-ip por padrao (para testar IP ausente ou forjado). */
+  noIp?: boolean;
   headers?: Record<string, string>;
 }
 
 export async function http(path: string, opts: Opts = {}): Promise<Res> {
-  const headers: Record<string, string> = { "x-forwarded-for": opts.ip ?? uniqueIp(), ...opts.headers };
+  const base = opts.base ?? BASE;
+  const headers: Record<string, string> = { ...(opts.noIp ? {} : { "x-real-ip": opts.ip ?? uniqueIp() }), ...opts.headers };
   if (opts.cookie) headers.cookie = opts.cookie;
   // Origem do app, como faz o navegador. `origin: null` simula requisicao sem Origin; string simula outro site.
-  const origin = opts.origin === undefined ? BASE : opts.origin;
+  const origin = opts.origin === undefined ? base : opts.origin;
   if (origin) headers.origin = origin;
-  let body: string | undefined;
-  if (opts.body !== undefined) {
+  let body: string | Blob | undefined;
+  if (opts.rawBody !== undefined) {
+    body = typeof opts.rawBody === "string" ? opts.rawBody : new Blob([opts.rawBody as BlobPart]);
+    if (opts.contentType) headers["content-type"] = opts.contentType;
+  } else if (opts.body !== undefined) {
     headers["content-type"] = "application/json";
     body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
   }
-  const res = await fetch(BASE + path, { method: opts.method ?? "GET", headers, body, redirect: "manual" });
+  const res = await fetch(base + path, { method: opts.method ?? "GET", headers, body, redirect: "manual" });
   const text = await res.text();
   let json: unknown = null;
   try {
@@ -51,7 +68,7 @@ export async function http(path: string, opts: Opts = {}): Promise<Res> {
 export async function login(email: string, password: string = TEST_PASSWORD, ip: string = uniqueIp()): Promise<string> {
   const res = await fetch(`${BASE}/api/auth/sign-in/email`, {
     method: "POST",
-    headers: { "content-type": "application/json", origin: BASE, "x-forwarded-for": ip },
+    headers: { "content-type": "application/json", origin: BASE, "x-real-ip": ip },
     body: JSON.stringify({ email, password }),
   });
   if (res.status !== 200) throw new Error(`login falhou (${res.status})`);
