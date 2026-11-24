@@ -81,3 +81,30 @@ export class DomainRuleError extends AppError {
     super(code, 422, message);
   }
 }
+
+// Arquivos (R-5): corpo grande demais, tipo recusado, link vencido e armazenamento fora do ar.
+export class PayloadTooLargeError extends AppError {
+  constructor(message = "O arquivo e maior que o limite permitido.") {
+    super("PAYLOAD_TOO_LARGE", 413, message);
+  }
+}
+
+export class UnsupportedMediaTypeError extends AppError {
+  constructor(message = "Tipo de arquivo nao permitido.", code = "UNSUPPORTED_MEDIA_TYPE") {
+    super(code, 415, message);
+  }
+}
+
+// Link assinado com assinatura valida, da propria pessoa, mas vencido: ela pede outro.
+export class GoneError extends AppError {
+  constructor(message = "O link venceu. Peca um novo.") {
+    super("LINK_EXPIRED", 410, message);
+  }
+}
+
+// Disco cheio, pasta ausente ou S3 fora: nunca sucesso falso, nunca detalhe interno.
+export class StorageUnavailableError extends AppError {
+  constructor(message = "Armazenamento indisponivel no momento. Tente novamente em instantes.") {
+    super("STORAGE_UNAVAILABLE", 503, message);
+  }
+}

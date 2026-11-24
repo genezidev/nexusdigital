@@ -267,3 +267,51 @@ Formato inspirado no MADR (https://github.com/adr/madr, MIT ou CC0).
 **Escolha:** `app/src/server/authorization/permissions.ts` (acoes novas `plan:*`, `subscription:*`, `cycle:*`, `content:*`, `comment:*`, `script:*`, `recording:*`, `asset:*`). ADMIN pode tudo menos `content:approve`. STAFF atribuido: le plano, assinatura e ciclo; opera conteudo, roteiro, arquivo e comentario interno; nao classifica cota nem aprova. CLIENT_OWNER: le o proprio retrato e progresso, comenta (so compartilhado), envia gravacao e arquivo, aprova. CLIENT_COLLABORATOR: igual, sem aprovar, salvo a concessao `content:approve`. `TenantContext` agora carrega `permissions` (lidas de `client_members` a cada requisicao). Cada servico e cada repositorio chamam `assertCan`; a RLS repete as regras de visibilidade e escrita.
 
 **Como conferir:** `src/server/authorization/permissions.test.ts` (matriz completa) e os testes de integracao da fase 2.
+
+## D-0015: driver de disco local para os arquivos (R-5); interface de storage no nivel dos bytes; S3 fica para depois
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de servidor; confirmacao do dono pendente (nada em producao)
+- Quem decidiu: agente de servidor, a partir da spec 0002 (P4) e de D-0010
+
+**Contexto:** D-0010 deixou a interface `ObjectStorage` com "alvo de envio assinado" e "URL de download" do proprio motor, pensando em S3. Para o disco local isso nao faz sentido (quem assina e o app) e, mesmo no S3, o link precisa ficar preso a pessoa e ser reconferido na entrega.
+
+**Escolha:** a interface passou a mover so bytes (`put` em streaming com limite, `open`, `delete`, `list` para orfaos); URL assinada, autorizacao e tipo real ficam na camada de servico (`services/files.ts`), igual para qualquer motor. Driver de disco (`storage/local-disk.ts`): pasta por `STORAGE_LOCAL_DIR` (recusada dentro de `public/`, `src/`, `.next/`, `node_modules/`), chave `clients/<cliente>/<uuid>` validada por regex estrita (nome do usuario nunca vira caminho: sem path traversal), escrita em `.tmp/<uuid>.part` (flag `wx`, modo 0600), contagem de bytes e SHA-256 em streaming, `fsync` e publicacao por `link` (falha se a chave ja existe: nunca sobrescreve), diretorios 0700. Disco cheio ou pasta impossivel: `StorageUnavailableError` (503), sem detalhe interno. **Driver S3 nao implementado** (capacidade da VPS desconhecida, sem S3 real para testar); `docs/armazenamento.md` lista o que ele precisara cumprir.
+
+**Limite aceito:** o envio e UM PUT em streaming, sem retomada por partes. Se cair, recomeca do zero enquanto o alvo vale. Para videos de ate 2 GB em rede movel isso pode ser ruim; **decisao do dono** se vale projetar envio em partes antes do uso real (nao foi feito para nao inventar complexidade sem teste).
+
+**Consequencias:** a pasta de arquivos entra no backup junto com o banco; permissao so do usuario do app; o `proxy.ts` NAO pode cobrir `/api/files` (o Proxy do Next bufferiza o corpo ate 10 MB e entrega so o inicio ao handler, em silencio: ver a mutacao H9 no handoff).
+
+**Como conferir:** `src/server/storage/storage.test.ts`, `tests/integration/fase2-arquivos.test.ts`, `tests/http/fase2-arquivos.test.ts`.
+
+## D-0016: URL assinada curta ligada a pessoa, cliente e arquivo; entrega com reautorizacao a cada requisicao
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de servidor; confirmacao do dono pendente
+- Quem decidiu: agente de servidor
+
+**Escolha:** token HMAC-SHA256 (`storage/signed-token.ts`) com `STORAGE_SIGNING_SECRET` (obrigatorio em producao; em dev/teste deriva do `BETTER_AUTH_SECRET`), carregando finalidade (envio ou download), arquivo, cliente, pessoa e vencimento. Envio: 900 s; download: 60 s (configuraveis). O link e emitido por `POST` (gasta limite por pessoa) so depois de `assertCan`, de conferir que o arquivo e do cliente da sessao, esta `DISPONIVEL` e e visivel para a pessoa. Na entrega (`GET /api/files/download/<token>`, `PUT /api/files/upload/<token>`) o servidor reconfere sessao, assinatura, `token.userId == sessao`, participacao ativa (`resolveTenantContext`) e visibilidade: perder o acesso mata o link antigo. **Qualquer falha de vinculo e 404** (assinatura ruim, outra pessoa, outro cliente, acesso perdido, objeto sumido); **410** so para a pessoa certa com acesso valido e link vencido (nao revela que a assinatura de um terceiro era valida). Entrega **sempre como anexo**, com `Content-Type` do tipo validado, `nosniff`, `CSP: default-src 'none'; sandbox`, `no-store` e nome limpo (RFC 6266/5987); a querystring nao muda nada. Sem `Range`.
+
+**Por que app-level e nao URL do motor:** o link pre-assinado do S3 nao fica preso a pessoa e nao reconfere acesso; aqui o app e sempre o porteiro. Custo: a banda passa pelo app (aceitavel no tamanho esperado; o S3 pode usar redirect de 60 s depois da reautorizacao, ver `docs/armazenamento.md`).
+
+**Como conferir:** `src/server/storage/storage.test.ts` (token), `tests/integration/fase2-arquivos.test.ts` (relogio simulado, outra pessoa, outro cliente, acesso perdido), `tests/http/fase2-arquivos.test.ts` (410 com relogio real de 5 s, links forjados com o segredo de teste).
+
+## D-0017: tipo real, limites por tipo e por pessoa, cota e limpeza (R-5)
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de servidor; valores dependem do dono (spec 0002, decisoes pendentes 2 e 3)
+- Quem decidiu: agente de servidor
+
+**Escolha:** (1) tipo real pelos primeiros 4096 bytes (`domain/file-type.ts`): JPEG, PNG, WebP, PDF (`%PDF-` no inicio), MP4 (so as marcas `isom`, `iso2` a `iso6`, `mp41`, `mp42`, `avc1`, `dash`, `M4V `, `MSNV`, `XAVC`; HEIC/HEIF/AVIF tambem usam `ftyp` e ficam de fora), MOV (`qt  `) e WebM (EBML com DocType `webm`; Matroska comum fica de fora). Tipo declarado, extensao final e conteudo precisam concordar; qualquer divergencia = 422, objeto apagado, registro `REJEITADO` e auditado. Extensao perigosa em QUALQUER parte do nome (`foto.jpg.exe`, maiusculas) recusa no pedido; isso tambem recusa nomes como `empresa.com.jpg` (falso positivo aceito: `com` esta na lista de executaveis da spec). (2) Limite por tipo por `MAX_IMAGE_MB`, `MAX_PDF_MB`, `MAX_VIDEO_MB` (20, 50, 2048); o envio e limitado ao MENOR entre o limite do tipo e o tamanho declarado, e tamanho recebido menor que o declarado nao finaliza (`INCOMPLETE_UPLOAD`, segue `PENDENTE`). (3) Por pessoa, nunca global: pedidos de alvo (`UPLOAD_RATE_MAX`, 60 por 10 min), links e entregas (`DOWNLOAD_RATE_MAX`, 300), pendentes simultaneos (10) e cota de armazenamento do cliente (`STORAGE_CLIENT_QUOTA_MB`, 50 GB, `DISPONIVEL` mais pendentes declarados). (4) Limpeza idempotente (`cleanupFiles` e `scripts/limpar-arquivos.mjs`): pendentes com mais de 24 h viram `EXCLUIDO`, objetos orfaos e temporarios velhos saem, nunca toca `DISPONIVEL`; roda com o papel do app em escopo de manutencao (`systemContextForMaintenance`, so tarefas, nunca handler). (5) Arquivo da gravacao precisa ser `VIDEO` `DISPONIVEL` que a pessoa ve.
+
+**Fica sem prova:** PDF ou video valido com conteudo malicioso (sem antivirus, decisao do dono); arquivo de 2 GB real; disco cheio real.
+
+## D-0018: contrato HTTP da fase 2 (portas separadas, Zod nos dois lados, erros do banco, idempotencia)
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de servidor
+- Quem decidiu: agente de servidor
+
+**Escolha:** duas portas sem autorizacao compartilhada: `/api/admin/clients/[id]/...` (`adminCtx`: ADMIN ou STAFF atribuido; o id da URL e so o alvo, 404 uniforme) e `/api/portal/...` (`portalCtx`: so pessoa de cliente; o cliente vem da sessao, `?clientId=` e ignorado). Catalogo de planos em `/api/admin/plans` (STAFF le, so ADMIN escreve). Id de rota malformado e inexistente respondem o mesmo 404. **Entrada**: `z.strictObject` em todo corpo (campo desconhecido, como `clientId`, `authorId` ou `status`, vira 422: sem mass assignment); autor e horario nunca vem do corpo; JSON com teto de 1 MB (413, lido em streaming, sem confiar so no Content-Length). **Saida**: esquemas Zod por recurso, um para a agencia e outro menor para o portal (`http/dto-fase2.ts`); `parse` descarta toda chave nao declarada. Regras que o banco faz valer (gatilhos, CHECK, unicidade, FK, RLS) viram 409/422/403 padronizados (`mapDatabaseError`); so o texto dos NOSSOS gatilhos volta ao cliente. Versao desatualizada: decisao (`versionId`), edicao de material e envio (`expectedVersionId`) recusam com 409. Idempotencia: decisao repetida da mesma pessoa = 200 com o mesmo id, upload finalizado repetido = 200, gravacao repetida = a mesma. Lista paginada (`page`, `pageSize` ate 50), filtrada e ordenada no servidor (`sort` so por colunas permitidas; valor invalido = 422). Sem server action e sem GET que mude estado (o link de download e emitido por POST). Auditoria: `plan.*`, `subscription.*`, `cycle.*`, `content.*` (inclui `planning_updated`), `approval.decided`, `asset.finalized|rejected|deleted|attached|detached|visibility_changed|pending_purged`, `script.*`, `recording.*`. O portal nunca recebe `overRevisionLimit`, classificacao de cota, objetivo, pilar, briefing, notas, rascunho, responsavel (so o nome, se marcado) nem `storage_key`.
+
+**Responsavel (assignee):** so ADMIN ou STAFF atribuido ao cliente (`assertAssignable`); impede apontar usuario de outro cliente.
+
+**Progresso no portal:** `GET /api/portal/plan` devolve o retrato da assinatura e SO numeros do ciclo (sem fora-da-cota por peca nem titulos); sem `cycleId`, vale o ciclo da competencia atual no fuso do cliente.
+
+**Como conferir:** `tests/http/fase2-*.test.ts`.

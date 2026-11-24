@@ -58,6 +58,14 @@ export async function createPlanVersion(db: Db, actor: Actor, code: string, inpu
   }
 }
 
+/** Nova versao a partir de um plano ja publicado (o id vem da URL; o codigo, do banco). */
+export async function createPlanVersionFromPlan(db: Db, actor: Actor, planId: string, input: Omit<PlanInput, "code">) {
+  const sys = await systemContextForAdmin(db, actor.userId);
+  const base = await withSystemScoped(db, sys, (s) => getPlan(s, planId));
+  if (!base) throw new NotFoundError();
+  return createPlanVersion(db, actor, base.code, input);
+}
+
 export async function deactivatePlan(db: Db, actor: Actor, planId: string) {
   const sys = await systemContextForAdmin(db, actor.userId);
   return withSystemScoped(db, sys, async (s) => {

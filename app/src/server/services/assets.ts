@@ -1,4 +1,4 @@
-import type { AssetLinkRole } from "@/generated/prisma/enums";
+import type { AssetLinkRole, Visibility } from "@/generated/prisma/enums";
 import type { TenantContext } from "@/server/authorization/context";
 import { assertCan, isAgency } from "@/server/authorization/permissions";
 import type { Db } from "@/server/db/client";
@@ -15,6 +15,7 @@ import {
   markAssetRejected,
   removeLink,
   reorderLink,
+  setAssetVisibility,
   type LinkTarget,
 } from "@/server/repositories/assets";
 import { recordAudit } from "@/server/repositories/audit";
@@ -71,6 +72,7 @@ export async function attachAsset(db: Db, ctx: TenantContext, input: { assetId: 
   return withTenant(db, ctx, async (s) => {
     if (!(await getAsset(s, input.assetId))) throw new NotFoundError();
     const link = await insertLink(s, input);
+    await recordAudit(s, { action: "asset.attached", entityType: "asset", entityId: input.assetId, diff: { role: input.role, linkId: link.id } });
     return { id: link.id };
   });
 }
@@ -78,6 +80,14 @@ export async function attachAsset(db: Db, ctx: TenantContext, input: { assetId: 
 export async function detachAsset(db: Db, ctx: TenantContext, linkId: string) {
   return withTenant(db, ctx, async (s) => {
     if ((await removeLink(s, linkId)) !== 1) throw new NotFoundError();
+    await recordAudit(s, { action: "asset.detached", entityType: "asset_link", entityId: linkId });
+  });
+}
+
+export async function changeAssetVisibility(db: Db, ctx: TenantContext, assetId: string, visibility: Visibility) {
+  return withTenant(db, ctx, async (s) => {
+    if ((await setAssetVisibility(s, assetId, visibility)) !== 1) throw new NotFoundError();
+    await recordAudit(s, { action: "asset.visibility_changed", entityType: "asset", entityId: assetId, diff: { visibility } });
   });
 }
 

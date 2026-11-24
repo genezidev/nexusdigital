@@ -9,6 +9,16 @@ export async function listSubscriptions(s: Scoped) {
   return s.tx.subscription.findMany({ where: { clientId: s.ctx.clientId }, orderBy: { startsOn: "desc" } });
 }
 
+export async function pageSubscriptions(s: Scoped, q: { page: number; pageSize: number; status?: SubscriptionStatus; dir: "asc" | "desc" }) {
+  assertCan(s.ctx, "subscription:read");
+  const where = { clientId: s.ctx.clientId, ...(q.status ? { status: q.status } : {}) };
+  const [items, total] = await Promise.all([
+    s.tx.subscription.findMany({ where, orderBy: [{ startsOn: q.dir }, { id: "asc" }], skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+    s.tx.subscription.count({ where }),
+  ]);
+  return { items, total };
+}
+
 export async function getSubscription(s: Scoped, id: string) {
   assertCan(s.ctx, "subscription:read");
   return s.tx.subscription.findFirst({ where: { id, clientId: s.ctx.clientId } });

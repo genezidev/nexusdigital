@@ -1,0 +1,82 @@
+import "server-only";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
+import { resolveTenantContext, type TenantContext } from "@/server/authorization/context";
+import { getDb } from "@/server/db/client";
+import { NotFoundError, TooManyRequestsError, ValidationError } from "@/server/errors";
+import { requireClientUser, requireStaffArea, type SessionActor } from "@/server/http/actor";
+import { consumeRateLimit } from "@/server/http/rate-limit";
+import { isUuid, resolveAdminClientContext } from "@/server/services/access";
+
+// Ajudantes das rotas da fase 2. Duas portas separadas, sem autorizacao compartilhada por acidente:
+//  - /api/admin/clients/[id]/...  -> adminCtx: ADMIN ou STAFF atribuido; o id da URL e so o ALVO (404 uniforme).
+//  - /api/portal/...              -> portalCtx: so pessoa de cliente; o cliente vem da SESSAO, nunca da URL.
+
+export interface Authorized {
+  actor: SessionActor;
+  ctx: TenantContext;
+}
+
+export async function adminCtx(req: NextRequest, clientId: string): Promise<Authorized> {
+  const actor = await requireStaffArea(req.headers);
+  const ctx = await resolveAdminClientContext(getDb(), actor, clientId);
+  return { actor, ctx };
+}
+
+export async function portalCtx(req: NextRequest): Promise<Authorized> {
+  const actor = await requireClientUser(req.headers);
+  const ctx = await resolveTenantContext(getDb(), { userId: actor.userId, activeClientId: actor.activeClientId });
+  return { actor, ctx };
+}
+
+/** Id de rota malformado e id inexistente respondem o MESMO 404 (nunca 500 de UUID invalido, nunca pista). */
+export function uuid(value: string): string {
+  if (!isUuid(value)) throw new NotFoundError();
+  return value;
+}
+
+/** Querystring validada com Zod (parametros desconhecidos, como ?clientId=, sao ignorados). */
+export function parseQuery<S extends z.ZodType>(req: Request, schema: S): z.output<S> {
+  const raw: Record<string, string> = {};
+  new URL(req.url).searchParams.forEach((v, k) => {
+    raw[k] ??= v;
+  });
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const fields: Record<string, string> = {};
+    for (const issue of parsed.error.issues) fields[issue.path.join(".") || "_"] ??= issue.message;
+    throw new ValidationError(fields);
+  }
+  return parsed.data;
+}
+
+/** Limite por PESSOA (nunca balde global): chave app:<nome>:user:<id> na tabela rate_limits. */
+export async function limitByUser(name: string, userId: string, rule: { windowSeconds: number; max: number }): Promise<void> {
+  const result = await consumeRateLimit(getDb(), `app:${name}:user:${userId}`, rule.windowSeconds, rule.max);
+  if (!result.allowed) throw new TooManyRequestsError(result.retryAfterSeconds);
+}
+
+// ---------- esquemas de consulta comuns ----------
+
+export const pageQuery = {
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  dir: z.enum(["asc", "desc"]).default("asc"),
+};
+
+export const q = z
+  .string()
+  .trim()
+  .max(100)
+  .optional()
+  .transform((v) => (v ? v : undefined));
+
+export const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a data no formato AAAA-MM-DD.");
+
+export function pageEnvelope<T>(items: T[], total: number, page: number, pageSize: number) {
+  return { items, total, page, pageSize };
+}
+
+export function monthRange(year: number, month: number): { from: Date; to: Date } {
+  return { from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) };
+}

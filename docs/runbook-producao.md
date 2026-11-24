@@ -63,3 +63,7 @@ Falha comum: `42501` ao gravar a auditoria significa que o papel dono não ignor
 ## Testes do script
 
 `app/tests/integration/provisionar.test.ts` roda o script contra bancos temporários (cópias criadas só para o teste, com as migrations reais): cria admin, é idempotente, não imprime senha, recusa senha fraca, recusa host não autorizado e recusa ambiente não declarado.
+
+## Arquivos privados (fase 2)
+
+Antes do primeiro envio em produção: definir `STORAGE_LOCAL_DIR` (caminho absoluto FORA da pasta do app, só o usuário do app escreve), `STORAGE_SIGNING_SECRET` (32+ caracteres, só no servidor; o app não inicia em produção sem ele), os limites `MAX_IMAGE_MB`, `MAX_PDF_MB`, `MAX_VIDEO_MB`, incluir a pasta no backup junto com o banco e agendar `node scripts/limpar-arquivos.mjs --ambiente producao` (uma vez por hora). Proxy reverso: sem limite de corpo abaixo do vídeo máximo e sem bufferizar o corpo de `/api/files/upload/`. Tudo em `docs/armazenamento.md`; nada disso foi executado em produção.

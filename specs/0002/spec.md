@@ -279,3 +279,31 @@ Escopo desta entrega: tabelas, regras no banco, repositorios, servicos, permisso
 | E2E, telas 360/768/1440, axe | NAO feito | fora desta entrega |
 
 Mutacoes e decisoes: `contexto/HANDOFF.md` (secao Fase 2) e `contexto/DECISOES.md` (D-0010 a D-0014).
+
+
+### Evidencias do backend (2026-11-25, agente de servidor)
+
+Escopo desta entrega: armazenamento privado (driver de disco), handlers HTTP de admin e portal, testes HTTP reais contra o app compilado. **Sem telas, sem E2E de navegador, sem migration nova** (nenhum arquivo em `app/prisma` mudou). Decisoes: D-0015 a D-0018. Regras: R-5 (fechada), R-16 e R-17; R-12 a R-15 agora tambem por HTTP.
+
+| Criterio da spec | Estado | Evidencia |
+|---|---|---|
+| Plano, assinatura, ciclo e 12 pecas; cliente ve plano e "0 de 12" | provado por API (sem tela) | `tests/http/fase2-fluxos.test.ts` (P1) |
+| Ciclo duplicado 409 (inclusive 3 pedidos simultaneos), fora da vigencia 422, cota congelada apos mudar o plano, ajuste so ADMIN com justificativa, retrato do ciclo encerrado | provado | idem |
+| Transicoes invalidas 422 com lista do permitido; cancelar sem justificativa 422; publicar sem URL/evidencia 422; publicado nao edita nem cancela; calendario por competencia; reagendar fora do mes 422 | provado por HTTP | `fase2-fluxos.test.ts` (P2); tabela completa origem x destino segue nos testes unitarios |
+| Aprovacao por versao: so dono ou colaborador com `content:approve`; ADMIN, STAFF e colaborador comum 403; autor e horario so do servidor; segunda decisao 409; mesma pessoa repetindo = mesma resposta; versao desatualizada 409; edicao invalida a aprovacao; 10 rodadas simultaneas = 1 decisao + 1 409 | provado por HTTP | `tests/http/fase2-aprovacao.test.ts` |
+| Silencio nao aprova (30 dias com relogio simulado) | nao ha o que simular: nenhuma tarefa aprova ou muda status por tempo; o teste so confirma que ler a fila e o conteudo nao muda nada | idem; selo de atraso continua na fase 4 |
+| Visibilidade: nenhum rascunho, nota, objetivo, pilar, briefing ou comentario interno em resposta do portal; chaves exatas do JSON do cliente | provado por HTTP (varredura de marcas, 3 pessoas, 11 rotas) | `fase2-aprovacao.test.ts` (R-13, R-16) |
+| Isolamento A x B em TODAS as rotas novas (leitura, edicao, listagem, download, anexo) e STAFF nao atribuido 404; banco do B identico antes e depois | provado por HTTP | `tests/http/fase2-idor.test.ts` (41 chamadas admin e 14 do portal, 5 tipos de pessoa). Exportacao: nao existe rota de exportacao nesta entrega |
+| Upload: imagem, PDF e video (12 MB) sobem, finalizam e baixam identicos; so como anexo; sem arquivo em `public/` | provado por HTTP | `tests/http/fase2-arquivos.test.ts` |
+| Arquivo malicioso: executavel como imagem, HTML, SVG, extensao dupla, MIME mentiroso, extensao trocada, sem extensao, HEIC como mp4: recusado, objeto apagado, `REJEITADO` auditado | provado (unitario, servico e HTTP) | `file-type.test.ts`, `fase2-arquivos.test.ts` (integracao e HTTP) |
+| Acima do limite 413 (pedido e durante a gravacao, com e sem Content-Length); zero byte; incompleto; conexao que cai nao deixa `DISPONIVEL`, objeto nem temporario; repetir envio idempotente | provado | idem |
+| URL de download expira (relogio simulado e relogio real de 5 s); de outra pessoa, de outro cliente, adulterada e de usuario sem acesso falham; perder acesso mata o link | provado | `storage.test.ts`, integracao e HTTP |
+| Pendente antigo e orfao limpos por tarefa idempotente e por comando | provado | `fase2-arquivos.test.ts` (integracao, inclui o comando `scripts/limpar-arquivos.mjs` contra `nexo_test`) |
+| Links: casos da spec recusados; nenhum acesso de rede ao validar | recusa provada por HTTP (14 casos) e por unitario com `fetch` proibido; **nao** ha cliente HTTP instrumentado dentro do servidor compilado | `fase2-fluxos.test.ts`, `external-link.test.ts` |
+| Limite de tentativas em upload e download (por pessoa, 429 com Retry-After); CSRF; corpo invalido, gigante e campo desconhecido | provado por HTTP | `fase2-arquivos.test.ts` |
+| Roteiro e gravacao: rascunho invisivel ao cliente, gravacao por link e por arquivo, confirmar, regravacao com justificativa visivel, historico, comentario interno escondido, envio repetido idempotente | provado por HTTP | `fase2-fluxos.test.ts` (P5) |
+| Busca por nome, @ e dominio do cliente real | zero ocorrencias, agora em `quality/checks.json` (`dados-ficticios`) | `app/scripts/conferir-dados-ficticios.mjs` |
+| E2E, telas 360/768/1440, axe | NAO feito | fora desta entrega |
+| Armazenamento S3, proxy reverso real, video de 2 GB, antivirus, disco cheio real, retomada de envio por partes | NAO provado | `docs/armazenamento.md` |
+
+Mutacoes (codigo quebrado de proposito, suite rodada, codigo restaurado): ver `contexto/HANDOFF.md`, secao "Fase 2: backend de arquivos e handlers HTTP".

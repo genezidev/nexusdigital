@@ -20,7 +20,20 @@ export default async function setup() {
     { port: HTTP_PORT + 1, env: { NEXO_TEST_TRUST_PROXY: "false" } },
     { port: HTTP_PORT + 2, env: { NEXO_TEST_IP_HEADER: "x-forwarded-for", NEXO_TEST_TRUSTED_PROXIES: "10.250.0.0/16,192.0.2.1" } },
     // Limites baixos de falhas por e-mail (3 por e-mail e IP, 6 no total) e limite por IP folgado.
-    { port: HTTP_PORT + 3, env: { AUTH_SIGNIN_RATE_MAX: "1000", AUTH_SIGNIN_EMAIL_MAX: "3", AUTH_SIGNIN_EMAIL_GLOBAL_MAX: "6" } },
+    // Na mesma instancia: limites baixos de pedidos de envio e de download (por pessoa), no maximo 2 envios pendentes e
+    // links de download de 5 s (para provar expiracao com relogio real).
+    {
+      port: HTTP_PORT + 3,
+      env: {
+        AUTH_SIGNIN_RATE_MAX: "1000",
+        AUTH_SIGNIN_EMAIL_MAX: "3",
+        AUTH_SIGNIN_EMAIL_GLOBAL_MAX: "6",
+        UPLOAD_RATE_MAX: "4",
+        DOWNLOAD_RATE_MAX: "4",
+        MAX_PENDING_UPLOADS_PER_USER: "3",
+        DOWNLOAD_URL_TTL_SECONDS: "5",
+      },
+    },
   ];
   const children: ChildProcess[] = [];
   let exited = false;

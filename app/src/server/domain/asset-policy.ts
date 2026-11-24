@@ -35,13 +35,27 @@ export function hasBlockedExtension(originalName: string): boolean {
 
 export type AssetRefusal = "TYPE_NOT_ALLOWED" | "TOO_LARGE" | "EMPTY" | "BLOCKED_EXTENSION";
 
-export function checkAssetDeclaration(input: { originalName: string; mimeType: string; bytes: number }):
+/** Limite de tamanho por categoria, em bytes (configuravel por MAX_IMAGE_MB, MAX_PDF_MB e MAX_VIDEO_MB). */
+export type AssetLimits = Readonly<Record<AssetCategory, number>>;
+
+export const DEFAULT_ASSET_LIMITS: AssetLimits = { IMAGEM: 20 * MB, DOCUMENTO: 50 * MB, VIDEO: 2 * 1024 * MB };
+
+/** Tamanho maximo para um tipo permitido (null se o tipo nao e permitido). */
+export function maxBytesFor(mimeType: string, limits: AssetLimits = DEFAULT_ASSET_LIMITS): number | null {
+  const rule = ALLOWED_ASSET_TYPES[mimeType.toLowerCase()];
+  return rule ? limits[rule.category] : null;
+}
+
+export function checkAssetDeclaration(
+  input: { originalName: string; mimeType: string; bytes: number },
+  limits: AssetLimits = DEFAULT_ASSET_LIMITS,
+):
   | { ok: true; category: AssetCategory }
   | { ok: false; code: AssetRefusal } {
   if (hasBlockedExtension(input.originalName)) return { ok: false, code: "BLOCKED_EXTENSION" };
   const rule = ALLOWED_ASSET_TYPES[input.mimeType.toLowerCase()];
   if (!rule) return { ok: false, code: "TYPE_NOT_ALLOWED" };
   if (!Number.isInteger(input.bytes) || input.bytes <= 0) return { ok: false, code: "EMPTY" };
-  if (input.bytes > rule.maxBytes) return { ok: false, code: "TOO_LARGE" };
+  if (input.bytes > limits[rule.category]) return { ok: false, code: "TOO_LARGE" };
   return { ok: true, category: rule.category };
 }

@@ -1,5 +1,6 @@
 {"checks":[
   {"nome":"prisma-generate","args":["node","node_modules/prisma/build/index.js","generate"],"diretorio":"app","timeout":300},
+  {"nome":"dados-ficticios","args":["node","scripts/conferir-dados-ficticios.mjs"],"diretorio":"app","timeout":120},
   {"nome":"lint","args":["node","node_modules/eslint/bin/eslint.js"],"diretorio":"app","timeout":600},
   {"nome":"typecheck","args":["node","node_modules/typescript/bin/tsc","--noEmit"],"diretorio":"app","timeout":600},
   {"nome":"testes-unitarios","args":["node","node_modules/vitest/vitest.mjs","run"],"diretorio":"app","timeout":600},

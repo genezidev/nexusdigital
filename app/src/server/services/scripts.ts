@@ -6,11 +6,13 @@ import { withTenant, type Scoped } from "@/server/db/scope";
 import { DEFAULT_RECORDING_DOMAINS, validateHttpsLink } from "@/server/domain/external-link";
 import { checkScriptTransition, isScriptEditable } from "@/server/domain/script-state";
 import { ConflictError, DomainRuleError, NotFoundError } from "@/server/errors";
-import { insertLink } from "@/server/repositories/assets";
+import { getAsset, insertLink } from "@/server/repositories/assets";
 import { recordAudit } from "@/server/repositories/audit";
 import { getContent } from "@/server/repositories/contents";
+import { assertAssignable } from "@/server/services/contents";
 import {
   countReceivedRecordings,
+  findPendingRecording,
   getRecording,
   getScript,
   insertRecording,
@@ -30,6 +32,7 @@ export async function createScript(db: Db, ctx: TenantContext, input: ScriptFiel
   validateReferences(input.referenceLinks);
   return withTenant(db, ctx, async (s) => {
     if (input.contentId && !(await getContent(s, input.contentId))) throw new NotFoundError();
+    await assertAssignable(s, input.assigneeId);
     const row = await insertScript(s, input);
     await recordAudit(s, { action: "script.created", entityType: "script", entityId: row.id });
     return row;
@@ -47,6 +50,8 @@ export async function editScript(db: Db, ctx: TenantContext, scriptId: string, p
     const script = await getScript(s, scriptId);
     if (!script) throw new NotFoundError();
     if (!isScriptEditable(script.status)) throw new DomainRuleError("SCRIPT_LOCKED", "So se edita roteiro em RASCUNHO.");
+    if (patch.contentId && !(await getContent(s, patch.contentId))) throw new NotFoundError();
+    await assertAssignable(s, patch.assigneeId);
     await updateScript(s, scriptId, patch);
     if (scenes) await replaceScenes(s, scriptId, scenes);
   });
@@ -111,6 +116,14 @@ export async function submitRecording(db: Db, ctx: TenantContext, input: SubmitR
     const script = await getScript(s, input.scriptId);
     if (!script) throw new NotFoundError();
     if (script.status !== "AGUARDANDO_GRAVACAO") throw new ConflictError("NOT_AWAITING_RECORDING", "O roteiro nao esta aguardando gravacao.");
+    if (input.assetId) {
+      // Arquivo precisa ser um video DISPONIVEL que esta pessoa enxerga (cliente: o que ele mesmo enviou).
+      const asset = await getAsset(s, input.assetId);
+      if (!asset || asset.status !== "DISPONIVEL" || asset.category !== "VIDEO") throw new NotFoundError();
+    }
+    // Idempotente: o mesmo envio repetido (botao apertado duas vezes) devolve a gravacao ja marcada, sem criar outra.
+    const same = await findPendingRecording(s, input.scriptId, { assetId: input.assetId, url: externalUrl });
+    if (same) return { id: same.id, replayed: true };
     const rec = await insertRecording(s, {
       scriptId: input.scriptId,
       kind: input.assetId ? "ARQUIVO" : "LINK",
@@ -119,7 +132,7 @@ export async function submitRecording(db: Db, ctx: TenantContext, input: SubmitR
     });
     if (input.assetId) await insertLink(s, { assetId: input.assetId, role: "GRAVACAO", recordingId: rec.id });
     await recordAudit(s, { action: "recording.submitted", entityType: "recording", entityId: rec.id, diff: { scriptId: input.scriptId, kind: rec.kind } });
-    return { id: rec.id };
+    return { id: rec.id, replayed: false };
   });
 }
 

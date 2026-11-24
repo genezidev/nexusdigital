@@ -80,7 +80,7 @@ export async function listAuditPage(s: SystemScoped, query: { page: number; page
 
 /** Auditoria de operacao de catalogo (sem cliente): so em escopo de sistema de ADMIN ou da area da agencia. */
 export async function recordSystemAudit(s: SystemScoped, entry: AuditEntry & { clientId?: string }) {
-  if (s.sys.reason !== "admin" && s.sys.reason !== "staff-area") throw new ForbiddenError();
+  if (s.sys.reason !== "admin" && s.sys.reason !== "staff-area" && s.sys.reason !== "maintenance") throw new ForbiddenError();
   await s.tx.auditLog.create({
     data: {
       clientId: entry.clientId ?? null,

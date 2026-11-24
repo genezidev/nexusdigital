@@ -30,6 +30,32 @@ export async function listScripts(s: Scoped) {
   return s.tx.script.findMany({ where: visibleWhere(s), orderBy: { createdAt: "desc" } });
 }
 
+export interface ScriptPageQuery {
+  page: number;
+  pageSize: number;
+  status?: ScriptStatus;
+  contentId?: string;
+  q?: string;
+  sort: "createdAt" | "title" | "status" | "deadlineOn";
+  dir: "asc" | "desc";
+}
+
+export async function pageScripts(s: Scoped, q: ScriptPageQuery) {
+  assertCan(s.ctx, "script:read");
+  const where: Prisma.ScriptWhereInput = {
+    ...visibleWhere(s),
+    ...(q.status ? { status: q.status } : {}),
+    ...(q.contentId ? { contentId: q.contentId } : {}),
+    ...(q.q ? { title: { contains: q.q, mode: "insensitive" as const } } : {}),
+  };
+  const orderBy = [{ [q.sort]: q.dir } as Prisma.ScriptOrderByWithRelationInput, { id: "asc" as const }];
+  const [items, total] = await Promise.all([
+    s.tx.script.findMany({ where, orderBy, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+    s.tx.script.count({ where }),
+  ]);
+  return { items, total };
+}
+
 export async function getScript(s: Scoped, id: string) {
   assertCan(s.ctx, "script:read");
   return s.tx.script.findFirst({ where: { id, ...visibleWhere(s) }, include: { scenes: { orderBy: { position: "asc" } } } });
@@ -80,6 +106,21 @@ export async function listRecordings(s: Scoped, scriptId: string) {
 export async function getRecording(s: Scoped, id: string) {
   assertCan(s.ctx, "script:read");
   return s.tx.recording.findFirst({ where: { id, clientId: s.ctx.clientId, script: visibleWhere(s) } });
+}
+
+/** Gravacao ainda ENVIADA (sem revisao) da mesma pessoa com o mesmo arquivo ou link: base da idempotencia do envio. */
+export async function findPendingRecording(s: Scoped, scriptId: string, same: { assetId?: string; url?: string }) {
+  assertCan(s.ctx, "script:read");
+  return s.tx.recording.findFirst({
+    where: {
+      clientId: s.ctx.clientId,
+      scriptId,
+      status: "ENVIADA",
+      submittedById: s.ctx.userId,
+      ...(same.assetId ? { assetLinks: { some: { assetId: same.assetId } } } : { externalUrl: same.url }),
+    },
+    select: { id: true },
+  });
 }
 
 export async function countReceivedRecordings(s: Scoped, scriptId: string): Promise<number> {

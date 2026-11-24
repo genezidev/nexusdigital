@@ -12,6 +12,16 @@ export async function listCycles(s: Scoped, subscriptionId?: string) {
   });
 }
 
+export async function pageCycles(s: Scoped, q: { page: number; pageSize: number; subscriptionId?: string; status?: "ABERTO" | "ENCERRADO"; dir: "asc" | "desc" }) {
+  assertCan(s.ctx, "cycle:read");
+  const where: Prisma.EditorialCycleWhereInput = { clientId: s.ctx.clientId, ...(q.subscriptionId ? { subscriptionId: q.subscriptionId } : {}), ...(q.status ? { status: q.status } : {}) };
+  const [items, total] = await Promise.all([
+    s.tx.editorialCycle.findMany({ where, orderBy: [{ year: q.dir }, { month: q.dir }, { id: "asc" }], skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+    s.tx.editorialCycle.count({ where }),
+  ]);
+  return { items, total };
+}
+
 export async function getCycle(s: Scoped, id: string) {
   assertCan(s.ctx, "cycle:read");
   return s.tx.editorialCycle.findFirst({ where: { id, clientId: s.ctx.clientId } });

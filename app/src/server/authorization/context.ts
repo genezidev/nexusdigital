@@ -25,7 +25,7 @@ export interface TenantContext {
 /** Escopo sem cliente (operacoes de ADMIN entre clientes e fluxos publicos por token). */
 export interface SystemContext {
   readonly [systemBrand]: true;
-  readonly reason: "admin" | "staff-area" | "public-token-flow" | "session-resolution" | "seed";
+  readonly reason: "admin" | "staff-area" | "public-token-flow" | "session-resolution" | "seed" | "maintenance";
   readonly userId: string | null;
 }
 
@@ -154,4 +154,9 @@ export function systemContextForPublicTokenFlow(): SystemContext {
 /** Uso exclusivo do seed e de testes, que rodam fora de uma sessao. */
 export function systemContextForSeed(): SystemContext {
   return systemContext("seed", null);
+}
+
+/** Uso exclusivo de tarefas de manutencao (limpeza de arquivos pendentes e orfaos): sem pessoa, sem handler. */
+export function systemContextForMaintenance(): SystemContext {
+  return systemContext("maintenance", null);
 }

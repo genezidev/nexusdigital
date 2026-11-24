@@ -72,9 +72,20 @@ export interface NewContentInput {
   countsTowardQuota?: boolean;
 }
 
+/** Responsavel so pode ser alguem da agencia: ADMIN ou STAFF atribuido a este cliente (nunca usuario de outro cliente). */
+export async function assertAssignable(s: Scoped, userId: string | null | undefined): Promise<void> {
+  if (!userId) return;
+  const ok = await s.tx.user.findFirst({
+    where: { id: userId, banned: false, OR: [{ role: "ADMIN" }, { role: "STAFF", memberships: { some: { clientId: s.ctx.clientId, role: "STAFF", status: "ACTIVE" } } }] },
+    select: { id: true },
+  });
+  if (!ok) throw new DomainRuleError("INVALID_ASSIGNEE", "O responsavel precisa ser alguem da equipe atribuida a este cliente.");
+}
+
 export async function createContent(db: Db, ctx: TenantContext, input: NewContentInput) {
   assertCan(ctx, "content:write");
   return withTenant(db, ctx, async (s) => {
+    await assertAssignable(s, input.assigneeId);
     const cycle = await getCycle(s, input.cycleId);
     if (!cycle) throw new NotFoundError();
     if (cycle.status !== "ABERTO") throw new DomainRuleError("CYCLE_CLOSED", "Ciclo encerrado nao recebe conteudo novo.");
@@ -120,7 +131,9 @@ export async function updatePlanning(
     const content = await requireContent(s, contentId);
     const outcome = classifyContentEdit(content.status, Object.keys(patch));
     if (!outcome.ok) throw new DomainRuleError(outcome.code, outcome.message);
+    await assertAssignable(s, patch.assigneeId);
     await updateContent(s, contentId, patch);
+    await recordAudit(s, { action: "content.planning_updated", entityType: "content", entityId: contentId, diff: { fields: Object.keys(patch) } });
   });
 }
 
@@ -180,13 +193,23 @@ export async function shareContent(db: Db, ctx: TenantContext, contentId: string
  * agendado) nasce NOVA versao ja enviada, copiando os vinculos de arquivo da atual, e a aprovacao anterior e
  * invalidada pelo proprio banco (gatilho de contents). Publicado/analisado: recusado.
  */
-export async function editMaterial(db: Db, ctx: TenantContext, contentId: string, material: VersionMaterial & { format?: ContentFormat; channel?: Channel }) {
+export async function editMaterial(
+  db: Db,
+  ctx: TenantContext,
+  contentId: string,
+  material: VersionMaterial & { format?: ContentFormat; channel?: Channel },
+  expectedVersionId?: string | null,
+) {
   assertCan(ctx, "content:write");
   const { format, channel, ...versionFields } = material;
   const changed = [...Object.keys(versionFields), ...(format ? ["format"] : []), ...(channel ? ["channel"] : [])];
   return withTenant(db, ctx, async (s) => {
     await lockContent(s, contentId);
     const content = await requireContent(s, contentId);
+    // Versao desatualizada: outra pessoa enviou uma versao nova enquanto esta tela editava a anterior.
+    if (expectedVersionId !== undefined && (content.currentVersionId ?? null) !== expectedVersionId) {
+      throw new ConflictError("STALE_VERSION", "Versao desatualizada: recarregue o conteudo antes de editar.");
+    }
     const outcome = classifyContentEdit(content.status, changed);
     if (!outcome.ok) throw new DomainRuleError(outcome.code, outcome.message);
     if (outcome.kind === "planning") throw new DomainRuleError("NOT_MATERIAL", "Nada de material para editar.");
@@ -231,7 +254,7 @@ async function publishVersion(s: Scoped, content: { id: string; status: ContentS
 }
 
 /** Envia o rascunho para aprovacao: a versao fica imutavel, vira a atual e o conteudo entra na fila do cliente. */
-export async function sendVersion(db: Db, ctx: TenantContext, contentId: string) {
+export async function sendVersion(db: Db, ctx: TenantContext, contentId: string, expectedDraftId?: string) {
   assertCan(ctx, "content:write");
   return withTenant(db, ctx, async (s) => {
     await lockContent(s, contentId);
@@ -240,6 +263,7 @@ export async function sendVersion(db: Db, ctx: TenantContext, contentId: string)
     if (!next) throw new DomainRuleError("INVALID_TRANSITION", `Nao ha envio de versao a partir de ${content.status}.`);
     const draft = await getDraftVersion(s, contentId);
     if (!draft) throw new DomainRuleError("NO_DRAFT", "Nao ha rascunho para enviar.");
+    if (expectedDraftId !== undefined && draft.id !== expectedDraftId) throw new ConflictError("STALE_VERSION", "O rascunho mudou: recarregue antes de enviar.");
     await publishVersion(s, content, draft.id, next, "send");
     return { versionId: draft.id, status: next };
   });

@@ -8,6 +8,8 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
     <div
       data-slot="table-container"
       className="relative w-full overflow-x-auto"
+      // Quando a tabela passa da largura (360 px com muitas linhas), a regiao rolavel precisa ser alcancavel pelo teclado (axe: scrollable-region-focusable).
+      tabIndex={0}
     >
       <table
         data-slot="table"

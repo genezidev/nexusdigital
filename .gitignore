@@ -35,3 +35,4 @@ Thumbs.db
 
 # Material do mantenedor (fora do pacote do aluno)
 _bastidores/
+.storage-local/

@@ -1,25 +1,41 @@
-// Interface de storage (D-0010). Nenhum motor existe ainda nesta entrega: o backend de arquivos (R-5)
-// implementa esta interface com disco local (dev e teste) e S3 compativel (producao). Telas, API e testes
-// conhecem so este contrato. Nunca devolve caminho publico: o acesso e por URL assinada curta,
-// emitida depois de assertCan e da conferencia de que o arquivo e do cliente da sessao.
-export interface SignedTarget {
-  url: string;
-  /** Cabecalhos que o cliente precisa mandar (ex.: limite de tamanho embutido no alvo). */
-  headers: Record<string, string>;
-  expiresAt: Date;
-}
+// Interface de storage (D-0010, revisada em D-0015). Telas, API e testes conhecem so este contrato.
+// Quem emite e confere URL assinada, autoriza e valida o tipo real e a camada de servico (services/files.ts);
+// o motor so move bytes, de forma limitada, em streaming e sem confiar em nada que veio do navegador.
+// Motores: disco local (storage/local-disk.ts, dev e teste) e S3 compativel (producao, ainda NAO implementado;
+// ver docs/armazenamento.md para o que ele precisa cumprir).
 
-export interface ObjectStat {
+export interface StoredObject {
   bytes: number;
-  /** SHA-256 em hexadecimal, calculado pelo servidor sobre o objeto gravado. */
+  /** SHA-256 em hexadecimal, calculado pelo servidor enquanto os bytes passam. */
   checksumSha256: string;
-  /** Primeiros bytes, para conferir o tipo real pela assinatura do arquivo. */
+  /** Primeiros bytes (ate HEAD_BYTES), para conferir o tipo real pela assinatura do arquivo. */
   head: Uint8Array;
 }
 
+export interface OpenedObject {
+  stream: ReadableStream<Uint8Array>;
+  bytes: number;
+}
+
+export interface ListedObject {
+  /** Chave do objeto (clients/<cliente>/<uuid>) ou, para sobras de envio, `.tmp/<nome>`. */
+  key: string;
+  modifiedAt: Date;
+}
+
 export interface ObjectStorage {
-  createUploadTarget(key: string, opts: { maxBytes: number; expiresInSeconds: number }): Promise<SignedTarget>;
-  createDownloadUrl(key: string, opts: { expiresInSeconds: number; filename?: string; inline?: boolean }): Promise<SignedTarget>;
-  stat(key: string): Promise<ObjectStat | null>;
+  readonly driver: "local";
+  /**
+   * Grava em streaming, SEM carregar o arquivo na memoria, em arquivo temporario, e so entao o torna visivel
+   * na chave final (atomico). Passou de `maxBytes`: aborta, apaga o temporario e lanca PayloadTooLargeError (413).
+   * Chave ja existente: ConflictError (nunca sobrescreve). Corpo interrompido: apaga o temporario e relanca.
+   * Disco cheio ou indisponivel: StorageUnavailableError (503).
+   */
+  put(key: string, source: ReadableStream<Uint8Array>, opts: { maxBytes: number }): Promise<StoredObject>;
+  /** Abre o objeto para leitura em streaming; null se nao existe. */
+  open(key: string): Promise<OpenedObject | null>;
+  /** Idempotente: objeto ja ausente nao e erro. */
   delete(key: string): Promise<void>;
+  /** Objetos e temporarios mais velhos que `olderThanMs` (limpeza de orfaos). */
+  list(opts: { olderThanMs: number; now?: Date }): AsyncIterable<ListedObject>;
 }

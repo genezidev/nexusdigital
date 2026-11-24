@@ -20,6 +20,9 @@ export function proxy(request: NextRequest) {
   return NextResponse.redirect(login);
 }
 
+// ATENCAO (R-5): NAO inclua /api/files aqui. Com o Proxy ativo, o Next bufferiza o corpo da requisicao ate 10 MB
+// (proxyClientMaxBodySize) e entrega so o inicio ao handler, sem erro: o envio de arquivo seria truncado em silencio.
+// As rotas /api/files/* conferem sessao e token assinado no proprio handler (docs/armazenamento.md).
 export const config = {
   matcher: ["/admin/:path*", "/portal/:path*", "/api/admin/:path*", "/api/portal/:path*", "/api/me/:path*"],
 };

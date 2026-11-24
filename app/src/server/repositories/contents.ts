@@ -68,6 +68,36 @@ export async function listContents(s: Scoped, filter: ContentFilter = {}) {
   return (await s.tx.content.findMany({ where, orderBy, select: contentClientSelect })).map(shapeForClient);
 }
 
+export interface ContentPageQuery extends ContentFilter {
+  page: number;
+  pageSize: number;
+  format?: ContentFormat;
+  visibility?: Visibility;
+  q?: string;
+  sort: "plannedOn" | "title" | "status" | "createdAt";
+  dir: "asc" | "desc";
+}
+
+/** Listagem paginada, filtrada e ordenada NO SERVIDOR. Cliente: so compartilhados, so campos da lista explicita. */
+export async function pageContents(s: Scoped, q: ContentPageQuery) {
+  assertCan(s.ctx, "content:read");
+  const agency = isAgency(s.ctx);
+  const where: Prisma.ContentWhereInput = {
+    ...visibleWhere(s),
+    ...(q.cycleId ? { cycleId: q.cycleId } : {}),
+    ...(q.status ? { status: q.status } : {}),
+    ...(q.format ? { format: q.format } : {}),
+    ...(agency && q.visibility ? { visibility: q.visibility } : {}),
+    ...(q.q ? { title: { contains: q.q, mode: "insensitive" as const } } : {}),
+    ...(q.plannedFrom || q.plannedTo ? { plannedOn: { gte: q.plannedFrom, lte: q.plannedTo } } : {}),
+  };
+  const orderBy = [{ [q.sort]: q.dir } as Prisma.ContentOrderByWithRelationInput, { id: "asc" as const }];
+  const page = { orderBy, skip: (q.page - 1) * q.pageSize, take: q.pageSize };
+  const total = await s.tx.content.count({ where });
+  if (agency) return { items: await s.tx.content.findMany({ where, ...page }), total };
+  return { items: (await s.tx.content.findMany({ where, ...page, select: contentClientSelect })).map(shapeForClient), total };
+}
+
 export async function getContent(s: Scoped, id: string) {
   assertCan(s.ctx, "content:read");
   if (isAgency(s.ctx)) return s.tx.content.findFirst({ where: { id, ...visibleWhere(s) } });

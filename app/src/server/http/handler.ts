@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import type { z } from "zod";
 import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
-import { BadRequestError, ForbiddenError, TooManyRequestsError, ValidationError } from "@/server/errors";
+import { BadRequestError, ForbiddenError, PayloadTooLargeError, TooManyRequestsError, ValidationError } from "@/server/errors";
 import { resolveClientIp } from "@/server/http/client-ip";
 import { consumeRateLimit } from "@/server/http/rate-limit";
 import { errorResponse, isNextControlFlow, newRequestId } from "@/server/http/respond";
@@ -28,14 +28,46 @@ export function assertSameOrigin(req: Request): void {
   throw new ForbiddenError("Origem nao permitida.");
 }
 
-/** Corpo JSON validado com Zod. Erro de formato = 400; regra de campo = 422 com mensagens em pt-BR. */
+/** Tamanho maximo de corpo JSON dos handlers proprios (arquivos nao passam por aqui: vao por PUT em streaming). */
+export const MAX_JSON_BODY_BYTES = 1024 * 1024;
+
+/**
+ * Le o corpo como texto com TETO de tamanho, sem confiar so no Content-Length (chunked nao declara): acima do
+ * teto devolve 413 e para de ler. Evita que um corpo gigante vire memoria do servidor.
+ */
+async function readBoundedText(req: Request, max: number): Promise<string> {
+  const declared = req.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared) && Number(declared) > max) {
+    await req.body?.cancel().catch(() => undefined);
+    throw new PayloadTooLargeError("O corpo da requisicao e grande demais.");
+  }
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new PayloadTooLargeError("O corpo da requisicao e grande demais.");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+/** Corpo JSON validado com Zod. Erro de formato = 400; corpo gigante = 413; regra de campo = 422 com mensagens em pt-BR. */
 export async function parseBody<S extends z.ZodType>(req: Request, schema: S): Promise<z.output<S>> {
   const type = req.headers.get("content-type") ?? "";
   if (!type.toLowerCase().startsWith("application/json")) throw new BadRequestError("Envie o corpo como JSON.");
   let raw: unknown;
   try {
-    raw = await req.json();
-  } catch {
+    raw = JSON.parse(await readBoundedText(req, MAX_JSON_BODY_BYTES));
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) throw error;
     throw new BadRequestError("JSON invalido.");
   }
   const parsed = schema.safeParse(raw);

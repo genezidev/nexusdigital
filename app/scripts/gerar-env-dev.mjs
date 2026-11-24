@@ -23,6 +23,9 @@ const linhas = [
   `SEED_PASSWORD=${randomBytes(12).toString("base64url")}Aa1!`,
   `BETTER_AUTH_SECRET=${randomBytes(32).toString("base64url")}`,
   "APP_URL=http://localhost:3000",
+  "# Arquivos privados (R-5): pasta fora de app/ e do Git (ver .gitignore) e segredo das URLs assinadas.",
+  `STORAGE_LOCAL_DIR=${fileURLToPath(new URL("../../.storage-local/dev", import.meta.url))}`,
+  `STORAGE_SIGNING_SECRET=${randomBytes(32).toString("base64url")}`,
   "",
 ];
 writeFileSync(alvo, linhas.join("\n"), { flag: "wx" });
