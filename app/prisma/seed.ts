@@ -6,6 +6,7 @@ import "dotenv/config";
 import { hashPassword } from "better-auth/crypto";
 import { createDb } from "../src/server/db/client";
 import type { GlobalRole, MemberRole } from "../src/generated/prisma/enums";
+import { seedPhase2 } from "./seed-fase2";
 
 const url = process.env.SEED_TARGET_URL ?? process.env.DATABASE_MIGRATE_URL;
 const password = process.env.SEED_PASSWORD;
@@ -64,7 +65,8 @@ async function main() {
       });
     }
   }
-  console.log(`Seed de demonstracao aplicado: ${CLIENTS.length} clientes, ${USERS.length} usuarios.`);
+  await seedPhase2(db);
+  console.log(`Seed de demonstracao aplicado: ${CLIENTS.length} clientes, ${USERS.length} usuarios, plano, assinaturas, ciclo e conteudos ficticios da fase 2.`);
 }
 
 main()

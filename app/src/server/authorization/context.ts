@@ -1,6 +1,7 @@
 import type { GlobalRole, MemberRole } from "@/generated/prisma/enums";
 import type { Db } from "@/server/db/client";
 import { withSystem } from "@/server/db/scope";
+export { audienceOf, type Audience } from "@/server/authorization/audience";
 import { ForbiddenError } from "@/server/errors";
 
 declare const tenantBrand: unique symbol;
@@ -17,12 +18,14 @@ export interface TenantContext {
   readonly globalRole: GlobalRole;
   /** null para ADMIN, que nao e membro: acessa qualquer cliente ativo. */
   readonly memberRole: MemberRole | null;
+  /** client_members.permissions da participacao (vazio para ADMIN): concessoes e revogacoes finas. */
+  readonly permissions: readonly string[];
 }
 
 /** Escopo sem cliente (operacoes de ADMIN entre clientes e fluxos publicos por token). */
 export interface SystemContext {
   readonly [systemBrand]: true;
-  readonly reason: "admin" | "public-token-flow" | "session-resolution" | "seed";
+  readonly reason: "admin" | "staff-area" | "public-token-flow" | "session-resolution" | "seed";
   readonly userId: string | null;
 }
 
@@ -39,8 +42,14 @@ function isBanned(user: Pick<UserGate, "banned" | "banExpires">): boolean {
   return !user.banExpires || user.banExpires.getTime() > Date.now();
 }
 
-function makeTenant(clientId: string, userId: string, globalRole: GlobalRole, memberRole: MemberRole | null): TenantContext {
-  return { clientId, userId, globalRole, memberRole } as TenantContext;
+function makeTenant(
+  clientId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  memberRole: MemberRole | null,
+  permissions: readonly string[] = [],
+): TenantContext {
+  return { clientId, userId, globalRole, memberRole, permissions } as TenantContext;
 }
 
 function systemContext(reason: SystemContext["reason"], userId: string | null): SystemContext {
@@ -68,7 +77,7 @@ export async function resolveTenantContext(
     const client = await tx.client.findUnique({ where: { id: clientId }, select: { status: true } });
     const member = await tx.clientMember.findUnique({
       where: { clientId_userId: { clientId, userId: session.userId } },
-      select: { role: true, status: true },
+      select: { role: true, status: true, permissions: true },
     });
     return { user, client, member };
   });
@@ -84,7 +93,7 @@ export async function resolveTenantContext(
   // STAFF so entra por atribuicao (linha STAFF); papeis de cliente so para usuarios comuns.
   if (user.role === "STAFF" && member.role !== "STAFF") throw new ForbiddenError();
   if (user.role === "USER" && member.role === "STAFF") throw new ForbiddenError();
-  return makeTenant(clientId, user.id, user.role, member.role);
+  return makeTenant(clientId, user.id, user.role, member.role, member.permissions);
 }
 
 /**
@@ -111,6 +120,19 @@ export async function systemContextForAdmin(db: Db, userId: string): Promise<Sys
   );
   if (!user || user.role !== "ADMIN" || isBanned(user)) throw new ForbiddenError();
   return systemContext("admin", userId);
+}
+
+/**
+ * Escopo de sistema para o catalogo da agencia (planos, sem cliente): ADMIN ou STAFF ativo e nao bloqueado.
+ * STAFF so le (a escrita do catalogo exige o escopo `admin`, e a RLS de service_plans recusa o resto).
+ */
+export async function systemContextForStaffArea(db: Db, userId: string): Promise<SystemContext> {
+  const sys = systemContext("session-resolution", userId);
+  const user = await withSystem(db, sys, (tx) =>
+    tx.user.findUnique({ where: { id: userId }, select: { role: true, banned: true, banExpires: true } }),
+  );
+  if (!user || (user.role !== "ADMIN" && user.role !== "STAFF") || isBanned(user)) throw new ForbiddenError();
+  return systemContext("staff-area", userId);
 }
 
 /**

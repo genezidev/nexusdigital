@@ -203,3 +203,67 @@ Formato inspirado no MADR (https://github.com/adr/madr, MIT ou CC0).
 **Consequencias:** o dono do banco precisa ignorar RLS para gravar a auditoria (superusuario ou `BYPASSRLS`); em caso contrario o script falha sem gravar nada. Ordem e comandos em `docs/runbook-producao.md`.
 
 **Como conferir:** `app/tests/integration/provisionar.test.ts` (bancos temporarios com as migrations reais).
+
+## D-0010: interface de storage; motor de disco local em dev e S3 compativel em producao (motor a decidir)
+
+- Data: 2026-11-25 · Estado: interface aceita pelo agente de dados (nenhum motor implementado); escolha do servico S3 depende do dono e do inventario da VPS
+- Quem decidiu: agente de dados, a partir da spec 0002 (decisoes pendentes 1 a 3, aprovadas pelo dono com as recomendacoes)
+
+**Escolha:** `app/src/server/storage/types.ts` define `ObjectStorage` (alvo de envio assinado com limite embutido, URL de download curta, `stat` com tamanho, SHA-256 e primeiros bytes, `delete`). `storage/keys.ts` gera a chave `clients/<client_id>/<uuid aleatorio>`, sem nome original nem extensao. O banco confere o formato (CHECK `assets_values_check`): chave da pasta de outro cliente e recusada. A politica de tipos e tamanhos (imagem 20 MB, PDF 50 MB, video 2 GB; JPEG, PNG, WebP, PDF, MP4, MOV, WebM) e a lista de extensoes bloqueadas (dupla extensao e maiusculas incluidas) sao funcoes puras em `domain/asset-policy.ts`. `assets.scan_status` nasce `NAO_VERIFICADO` e so a agencia o muda (gatilho): pronto para quarentena. O servico `services/assets.ts` so registra o estado: cria o registro PENDENTE com chave aleatoria, finaliza com tipo, tamanho e SHA-256 medidos pelo servidor (fora da politica vira REJEITADO e auditado) e autoriza o download devolvendo a chave so para quem ve o arquivo.
+
+**Fica para o backend de arquivos (R-5):** driver de disco local, driver S3, rota de upload e de download com URL assinada, conferencia do tipo real pelos primeiros bytes, limpeza de pendentes e orfaos, limite de tentativas por usuario. Nada disso foi implementado nem provado nesta entrega.
+
+**Como conferir:** `src/server/domain/asset-policy.test.ts`, `tests/integration/fase2-planejamento-arquivos.test.ts` (bloco de arquivos).
+
+## D-0011: aprovacao imutavel e vinculada a versao; primeira decisao vence
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de dados; confirmacao do dono pendente (aplicada so em `nexo_dev` e `nexo_test`)
+- Quem decidiu: agente de dados, a partir da spec 0002 (P3 e casos-limite)
+
+**Escolha:**
+- **Versao atual = um unico ponteiro** (`contents.current_version_id`), e nao uma coluna booleana por versao: "so uma versao e a atual" vale por construcao. O gatilho `contents_guard` exige que o ponteiro so avance, para uma versao ENVIADA do proprio conteudo (a FK composta cobre o cliente).
+- **Versao ENVIADA e imutavel** (gatilho `content_versions_guard`, `ENABLE ALWAYS`, vale para qualquer papel); numero sequencial por conteudo; no maximo um rascunho por conteudo (indice parcial); o historico de versoes nunca e apagado.
+- **Aprovacao** (`approvals`): `INSERT` so pela pessoa do CLIENTE (a politica RLS exige `app.audience = 'client'` e `author_id = app.user_id`: ADMIN e STAFF nao aprovam em nome do cliente nem por SQL; o escopo de sistema tambem nao); o gatilho `approvals_guard` grava `created_at` com o horario do servidor e recusa decisao sobre versao que nao e a atual, versao que nao e ENVIADA e conteudo que nao esta AGUARDANDO_APROVACAO. `UPDATE` so para invalidar uma vez (GRANT por coluna em `invalidated_at` e `invalidation_reason`); `DELETE` e `TRUNCATE` recusados para qualquer papel (`ENABLE ALWAYS`).
+- **Concorrencia (decisao pedida no briefing): a PRIMEIRA decisao vence.** Camadas: (1) trava consultiva por conteudo (`pg_advisory_xact_lock`) no servico, que serializa as requisicoes e permite devolver 409 "ja decidida por [nome] em [data]"; (2) indice unico parcial `approvals_one_active_decision_per_version (version_id) WHERE invalidated_at IS NULL`; (3) gatilho que recusa se a versao nao e mais a atual. Mesma pessoa repetindo a mesma decisao recebe a mesma resposta, sem linha nova. Aprovar e pedir revisao ao mesmo tempo: quem chegou primeiro vence.
+- **Invalidacao no proprio banco:** ao mudar o ponteiro de versao atual, o gatilho `contents_invalidate_approvals` marca como invalidadas (motivo `NOVA_VERSAO`) as decisoes ativas da versao anterior; a linha fica como historico. Editar material de conteudo APROVADO ou AGENDADO cria nova versao ja ENVIADA (copiando os vinculos de arquivo) e devolve o conteudo a AGUARDANDO_APROVACAO.
+- **O cliente so decide o status:** politica de UPDATE em `contents` para o lado do cliente (so conteudo compartilhado AGUARDANDO_APROVACAO, so para APROVADO ou EM_REVISAO) mais gatilho que recusa qualquer outra coluna alterada por sessao de cliente.
+- Briefing fica na versao e conta como material (qualquer mudanca gera nova versao): mais conservador que a spec, que nao o lista.
+- Comentarios sao imutaveis (gatilho, sem UPDATE nem DELETE).
+
+**Como conferir:** `tests/integration/fase2-visibility-approval.test.ts` (inclui 20 rodadas de aprovacao concorrente por `Promise.all`, indice sem gatilho e gatilho sem indice).
+
+## D-0012: chaves estrangeiras compostas (client_id, id) e RLS por audiencia
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de dados; confirmacao do dono pendente
+- Quem decidiu: agente de dados, a partir de D-0003 e D-0004
+
+**Escolha:** toda tabela de cliente tem `UNIQUE (client_id, id)` e toda ligacao entre tabelas de cliente usa FK composta `(client_id, x_id) -> (client_id, id)` (migration `20261125100000_planos_conteudos_aprovacao_arquivos`; reversao `prisma/rollback/20261125100000_planos_conteudos_aprovacao_arquivos.down.sql`, ensaiada em `nexo_test`). Ligar conteudo do A a ciclo do B, versao a conteudo, aprovacao a versao, vinculo de arquivo a versao, roteiro, gravacao ou conteudo falha no banco, ate pela conexao do dono. FKs opcionais (conteudo do roteiro, versao do comentario, versao atual) usam `MATCH SIMPLE`: coluna nula nao e conferida, e o `client_id` continua amarrado pela FK do proprio cliente. Todas com `ON DELETE RESTRICT`.
+- **Duas variaveis novas por transacao**, gravadas por `withTenant` (`app/src/server/db/scope.ts`): `app.audience` (`admin`, `staff` ou `client`, derivado de `users.role`) e `app.user_id`. Sem contexto o padrao e `client` (menos privilegiado). `withSystem` as zera. Com elas a RLS decide: o cliente so ve conteudo COMPARTILHADO, versao ENVIADA, comentario compartilhado, roteiro a partir de ENVIADO e arquivo ligado a destino visivel; so a agencia escreve em conteudo, versao e roteiro; so o ADMIN escreve em assinatura, ciclo e plano.
+- **Gatilhos tratam conexao sem contexto como cliente.** Seed e fixtures que usam a conexao do dono precisam abrir transacao com `set_config('app.system','on',true)` (feito em `prisma/seed-fase2.ts` e `tests/integration/helpers/phase2.ts`).
+- `service_plans` nao tem `client_id`: leitura so de ADMIN e STAFF (RLS e `systemContextForStaffArea`), escrita so do ADMIN (RLS e `systemContextForAdmin`), plano publicado imutavel (gatilho; so `active` muda). O portal le plano e preco do retrato da assinatura, congelado por gatilho.
+- **Contadores de progresso:** `cycle_progress_counts(cycle_id)` e `SECURITY DEFINER` de proposito (o portal precisa dos numeros de todo o ciclo, inclusive pecas ainda internas, nunca dos titulos); o corpo trava no `app.client_id` e devolve so contagens. **Exige dono do banco com BYPASSRLS ou superusuario** (como o provisionamento, D-0009); com dono sem esse atributo a funcao devolveria zero linhas. Confirmar no deploy.
+- Permissoes finas: STAFF atribuido tem `content:write` e `script:write` por padrao e pode te-las revogadas com entradas negativas (`-content:write`) em `client_members.permissions`; CLIENT_COLLABORATOR so aprova com a entrada `content:approve`. Nenhuma outra concessao e aceita. Nao ha tela para editar isso (por banco ou seed ate la).
+
+**Como conferir:** `tests/integration/fase2-isolation.test.ts`, `src/server/authorization/permissions.test.ts`.
+
+## D-0013: regra de progresso e maquinas de estado como funcoes puras
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de dados; duas escolhas de borda para o dono confirmar
+- Quem decidiu: agente de dados, a partir da spec 0002
+
+**Escolha:** `domain/progress.ts` (`computeCycleProgress`), `domain/content-state.ts`, `domain/script-state.ts` e `domain/external-link.ts` sao puras (sem banco, sem relogio, sem rede). Porcentagem por aritmetica inteira (`floor(publicadas * 100 / cota)`, trava em 100): sem erro de ponto flutuante. Contam so `countsTowardQuota && !isBonus` e status diferente de CANCELADO; Story, bonus e nao contaveis vao para `outsideQuota`; cancelados nao entram em nada. Funil cumulativo: publicadas (PUBLICADO, ANALISADO) estao em aprovadas (mais APROVADO, AGENDADO), em produzidas (mais AGUARDANDO_APROVACAO, EM_REVISAO) e em planejadas.
+- **Cota zero:** `hasQuota=false`, porcentagem nula ("sem cota definida") e **excedente 0** (a spec dava `max(publicadas - cota, 0)`, que mostraria excedente sem haver meta; escolhi 0). Confirmar com o dono.
+- Maquina do conteudo com tres gatilhos (`manual`, `version_sent`, `client_decision`): a agencia nunca aprova a mao; invalidar so por nova versao; CANCELADO terminal com justificativa de 10+ caracteres; PUBLICADO exige data e URL HTTPS (Instagram: instagram.com) ou evidencia; material de PUBLICADO ou ANALISADO nao se edita.
+- Maquina do roteiro: fluxo linear mais regravacao (GRAVACAO_RECEBIDA ou EM_EDICAO volta a AGUARDANDO_GRAVACAO, com justificativa); com conteudo ligado, AGUARDANDO_APROVACAO, FINALIZADO e PUBLICADO exigem o estado do conteudo. A spec nao define cancelamento de roteiro: nao existe.
+- Ciclo encerrado grava retrato (`close_snapshot`: contadores e escopo) e as telas leem o retrato; o banco recusa qualquer mudanca em ciclo encerrado, exceto reabrir com justificativa.
+
+**Como conferir:** `src/server/domain/*.test.ts` (tabelas completas origem x destino, exemplo 7 de 12 = 58%, excedente 2).
+
+## D-0014: matriz de permissoes da fase 2 (deny-by-default)
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de dados, a partir da matriz da spec 0002
+- Quem decidiu: agente de dados
+
+**Escolha:** `app/src/server/authorization/permissions.ts` (acoes novas `plan:*`, `subscription:*`, `cycle:*`, `content:*`, `comment:*`, `script:*`, `recording:*`, `asset:*`). ADMIN pode tudo menos `content:approve`. STAFF atribuido: le plano, assinatura e ciclo; opera conteudo, roteiro, arquivo e comentario interno; nao classifica cota nem aprova. CLIENT_OWNER: le o proprio retrato e progresso, comenta (so compartilhado), envia gravacao e arquivo, aprova. CLIENT_COLLABORATOR: igual, sem aprovar, salvo a concessao `content:approve`. `TenantContext` agora carrega `permissions` (lidas de `client_members` a cada requisicao). Cada servico e cada repositorio chamam `assertCan`; a RLS repete as regras de visibilidade e escrita.
+
+**Como conferir:** `src/server/authorization/permissions.test.ts` (matriz completa) e os testes de integracao da fase 2.

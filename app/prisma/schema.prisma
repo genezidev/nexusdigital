@@ -67,6 +67,16 @@ model User {
   invitationsAccepted Invitation[]   @relation("InvitationAccepter")
   auditLogs           AuditLog[]
 
+  // Fase 2: autoria preservada (usuario nunca e apagado; ver D-0007).
+  contentsAssigned    Content[]        @relation("ContentAssignee")
+  versionsAuthored    ContentVersion[] @relation("VersionAuthor")
+  approvalsGiven      Approval[]       @relation("ApprovalAuthor")
+  commentsWritten     Comment[]        @relation("CommentAuthor")
+  scriptsAssigned     Script[]         @relation("ScriptAssignee")
+  recordingsSubmitted Recording[]      @relation("RecordingSubmitter")
+  recordingsReviewed  Recording[]      @relation("RecordingReviewer")
+  assetsUploaded      Asset[]          @relation("AssetUploader")
+
   @@unique([email])
   @@map("users")
 }
@@ -162,6 +172,19 @@ model Client {
   auditLogs   AuditLog[]
   sessions    Session[]
 
+  // Fase 2 (todas com client_id obrigatorio e RLS forcada).
+  subscriptions   Subscription[]
+  cycles          EditorialCycle[]
+  contents        Content[]
+  contentVersions ContentVersion[]
+  approvals       Approval[]
+  comments        Comment[]
+  scripts         Script[]
+  scriptScenes    ScriptScene[]
+  recordings      Recording[]
+  assets          Asset[]
+  assetLinks      AssetLink[]
+
   @@unique([slug])
   @@map("clients")
 }
@@ -227,4 +250,459 @@ model AuditLog {
   @@index([clientId, createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// =====================================================================================
+// Fase 2: planos, ciclos, conteudos, aprovacao, roteiros e arquivos (migration 20261125100000).
+// Toda tabela de cliente tem client_id obrigatorio, RLS forcada e FKs COMPOSTAS (client_id, id):
+// o banco recusa ligar linha de um cliente a linha de outro. Ver contexto/DECISOES.md D-0010 a D-0014.
+// =====================================================================================
+
+enum Visibility {
+  INTERNO
+  COMPARTILHADO
+}
+
+enum SubscriptionStatus {
+  ATIVA
+  PAUSADA
+  ENCERRADA
+}
+
+enum CycleStatus {
+  ABERTO
+  ENCERRADO
+}
+
+enum ContentFormat {
+  ARTE
+  CARROSSEL
+  REEL_ANIMADO
+  REEL_HUMANIZADO
+  STORY
+  OUTRO
+}
+
+enum Channel {
+  INSTAGRAM
+  FACEBOOK
+  TIKTOK
+  YOUTUBE
+  LINKEDIN
+  OUTRO
+}
+
+enum ContentStatus {
+  PLANEJADO
+  EM_PRODUCAO
+  AGUARDANDO_APROVACAO
+  EM_REVISAO
+  APROVADO
+  AGENDADO
+  PUBLICADO
+  ANALISADO
+  CANCELADO
+}
+
+enum VersionStatus {
+  RASCUNHO
+  ENVIADA
+}
+
+enum ApprovalDecision {
+  APROVADO
+  REVISAO_SOLICITADA
+}
+
+enum ScriptStatus {
+  RASCUNHO
+  ENVIADO
+  AGUARDANDO_GRAVACAO
+  GRAVACAO_RECEBIDA
+  EM_EDICAO
+  AGUARDANDO_APROVACAO
+  FINALIZADO
+  PUBLICADO
+}
+
+enum RecordingKind {
+  ARQUIVO
+  LINK
+}
+
+enum RecordingStatus {
+  ENVIADA
+  RECEBIDA
+  REGRAVACAO_SOLICITADA
+}
+
+enum AssetStatus {
+  PENDENTE
+  DISPONIVEL
+  REJEITADO
+  EXCLUIDO
+}
+
+enum ScanStatus {
+  NAO_VERIFICADO
+  LIMPO
+  QUARENTENA
+}
+
+enum AssetCategory {
+  IMAGEM
+  VIDEO
+  DOCUMENTO
+}
+
+enum AssetLinkRole {
+  PREVIA
+  FINAL
+  REFERENCIA
+  PDF_ROTEIRO
+  GRAVACAO
+  EVIDENCIA
+}
+
+// Catalogo da agencia: SEM client_id. Plano publicado nao e editado (so `active`); mudar = nova versao.
+model ServicePlan {
+  id                           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                         String
+  version                      Int
+  name                         String
+  monthlyAmountCents           Int      @map("monthly_amount_cents")
+  monthlyQuota                 Int      @map("monthly_quota")
+  revisionsPerPiece            Int      @map("revisions_per_piece")
+  approvalDeadlineBusinessDays Int      @map("approval_deadline_business_days")
+  scope                        String
+  exclusions                   String   @default("")
+  active                       Boolean  @default(true)
+  createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  subscriptions Subscription[]
+
+  @@unique([code, version])
+  @@map("service_plans")
+}
+
+// Retrato do plano no momento da contratacao: o portal le so isto, nunca o catalogo.
+model Subscription {
+  id                           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId                     String             @map("client_id") @db.Uuid
+  planId                       String             @map("plan_id") @db.Uuid
+  planCode                     String             @map("plan_code")
+  planName                     String             @map("plan_name")
+  planVersion                  Int                @map("plan_version")
+  scopeSnapshot                String             @map("scope_snapshot")
+  exclusionsSnapshot           String             @default("") @map("exclusions_snapshot")
+  amountCents                  Int                @map("amount_cents")
+  quota                        Int
+  revisionsPerPiece            Int                @map("revisions_per_piece")
+  approvalDeadlineBusinessDays Int                @map("approval_deadline_business_days")
+  startsOn                     DateTime           @map("starts_on") @db.Date
+  endsOn                       DateTime?          @map("ends_on") @db.Date
+  billingDay                   Int                @map("billing_day")
+  status                       SubscriptionStatus @default(ATIVA)
+  createdAt                    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  plan   ServicePlan      @relation(fields: [planId], references: [id], onDelete: Restrict)
+  cycles EditorialCycle[]
+
+  @@unique([clientId, id])
+  @@index([clientId, status])
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+model EditorialCycle {
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId          String      @map("client_id") @db.Uuid
+  subscriptionId    String      @map("subscription_id") @db.Uuid
+  year              Int
+  month             Int
+  quota             Int
+  previousQuota     Int?        @map("previous_quota")
+  quotaChangeReason String?     @map("quota_change_reason")
+  status            CycleStatus @default(ABERTO)
+  closedAt          DateTime?   @map("closed_at") @db.Timestamptz(3)
+  // Retrato de fechamento: contadores finais e escopo vigente; as telas leem isto depois de encerrar.
+  closeSnapshot     Json?       @map("close_snapshot")
+  reopenedAt        DateTime?   @map("reopened_at") @db.Timestamptz(3)
+  reopenReason      String?     @map("reopen_reason")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [clientId, subscriptionId], references: [clientId, id], onDelete: Restrict)
+  contents     Content[]
+
+  @@unique([subscriptionId, year, month])
+  @@unique([clientId, id])
+  @@index([clientId, year, month])
+  @@index([clientId, status])
+  @@map("editorial_cycles")
+}
+
+model Content {
+  id                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId                String        @map("client_id") @db.Uuid
+  cycleId                 String        @map("cycle_id") @db.Uuid
+  title                   String
+  description             String?
+  format                  ContentFormat
+  channel                 Channel       @default(INSTAGRAM)
+  objective               String?
+  pillar                  String?
+  // Data local do cliente (sem hora): o calendario do mes usa esta data.
+  plannedOn               DateTime      @map("planned_on") @db.Date
+  publishedAt             DateTime?     @map("published_at") @db.Timestamptz(3)
+  publicationUrl          String?       @map("publication_url")
+  assigneeId              String?       @map("assignee_id") @db.Uuid
+  assigneeVisibleToClient Boolean       @default(false) @map("assignee_visible_to_client")
+  status                  ContentStatus @default(PLANEJADO)
+  visibility              Visibility    @default(INTERNO)
+  countsTowardQuota       Boolean       @default(true) @map("counts_toward_quota")
+  isBonus                 Boolean       @default(false) @map("is_bonus")
+  currentVersionId        String?       @map("current_version_id") @db.Uuid
+  internalNotes           String?       @map("internal_notes")
+  cancelReason            String?       @map("cancel_reason")
+  cancelledAt             DateTime?     @map("cancelled_at") @db.Timestamptz(3)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client         Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  cycle          EditorialCycle   @relation(fields: [clientId, cycleId], references: [clientId, id], onDelete: Restrict)
+  assignee       User?            @relation("ContentAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  currentVersion ContentVersion?  @relation("CurrentVersion", fields: [clientId, currentVersionId], references: [clientId, id], onDelete: Restrict)
+  versions       ContentVersion[] @relation("VersionContent")
+  approvals      Approval[]
+  comments       Comment[]
+  scripts        Script[]
+  assetLinks     AssetLink[]
+
+  @@unique([clientId, id])
+  @@index([clientId, status])
+  @@index([clientId, plannedOn])
+  @@index([clientId, cycleId])
+  @@map("contents")
+}
+
+// Versao ENVIADA e imutavel (gatilho). A "atual" e contents.current_version_id (um unico ponteiro).
+model ContentVersion {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId  String        @map("client_id") @db.Uuid
+  contentId String        @map("content_id") @db.Uuid
+  number    Int
+  status    VersionStatus @default(RASCUNHO)
+  caption   String?
+  cta       String?
+  hashtags  String[]      @default([])
+  briefing  String?
+  authorId  String        @map("author_id") @db.Uuid
+  sentAt    DateTime?     @map("sent_at") @db.Timestamptz(3)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client     Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  content    Content     @relation("VersionContent", fields: [clientId, contentId], references: [clientId, id], onDelete: Restrict)
+  author     User        @relation("VersionAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  currentOf  Content[]   @relation("CurrentVersion")
+  approvals  Approval[]
+  comments   Comment[]
+  assetLinks AssetLink[]
+
+  @@unique([contentId, number])
+  @@unique([clientId, id])
+  @@index([clientId, contentId])
+  @@map("content_versions")
+}
+
+// Imutavel: sem DELETE; UPDATE so para invalidar (gatilhos). Uma decisao ativa por versao (indice parcial).
+model Approval {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId           String           @map("client_id") @db.Uuid
+  contentId          String           @map("content_id") @db.Uuid
+  versionId          String           @map("version_id") @db.Uuid
+  decision           ApprovalDecision
+  comment            String?
+  authorId           String           @map("author_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  invalidatedAt      DateTime?        @map("invalidated_at") @db.Timestamptz(3)
+  invalidationReason String?          @map("invalidation_reason")
+
+  client  Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  content Content        @relation(fields: [clientId, contentId], references: [clientId, id], onDelete: Restrict)
+  version ContentVersion @relation(fields: [clientId, versionId], references: [clientId, id], onDelete: Restrict)
+  author  User           @relation("ApprovalAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, contentId, createdAt])
+  @@index([versionId])
+  @@map("approvals")
+}
+
+// Imutavel (sem UPDATE nem DELETE). Exatamente um alvo: conteudo ou roteiro.
+model Comment {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId   String     @map("client_id") @db.Uuid
+  contentId  String?    @map("content_id") @db.Uuid
+  scriptId   String?    @map("script_id") @db.Uuid
+  versionId  String?    @map("version_id") @db.Uuid
+  authorId   String     @map("author_id") @db.Uuid
+  body       String
+  visibility Visibility @default(INTERNO)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client  Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  content Content?        @relation(fields: [clientId, contentId], references: [clientId, id], onDelete: Restrict)
+  script  Script?         @relation(fields: [clientId, scriptId], references: [clientId, id], onDelete: Restrict)
+  version ContentVersion? @relation(fields: [clientId, versionId], references: [clientId, id], onDelete: Restrict)
+  author  User            @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, contentId, createdAt])
+  @@index([clientId, scriptId, createdAt])
+  @@map("comments")
+}
+
+model Script {
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId               String       @map("client_id") @db.Uuid
+  contentId              String?      @map("content_id") @db.Uuid
+  title                  String
+  objective              String?
+  plannedDurationSeconds Int?         @map("planned_duration_seconds")
+  assigneeId             String?      @map("assignee_id") @db.Uuid
+  deadlineOn             DateTime?    @map("deadline_on") @db.Date
+  location               String?
+  equipment              String?
+  vertical916            Boolean      @default(true) @map("vertical_9_16")
+  audioNotes             String?      @map("audio_notes")
+  lightNotes             String?      @map("light_notes")
+  framingNotes           String?      @map("framing_notes")
+  referenceLinks         Json         @default("[]") @map("reference_links")
+  checklist              Json         @default("[]")
+  status                 ScriptStatus @default(RASCUNHO)
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client     Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  content    Content?      @relation(fields: [clientId, contentId], references: [clientId, id], onDelete: Restrict)
+  assignee   User?         @relation("ScriptAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  scenes     ScriptScene[]
+  recordings Recording[]
+  comments   Comment[]
+  assetLinks AssetLink[]
+
+  @@unique([clientId, id])
+  @@index([clientId, status])
+  @@index([clientId, contentId])
+  @@map("scripts")
+}
+
+model ScriptScene {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId        String   @map("client_id") @db.Uuid
+  scriptId        String   @map("script_id") @db.Uuid
+  position        Int
+  dialogue        String?
+  action          String?
+  durationSeconds Int?     @map("duration_seconds")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  script Script @relation(fields: [clientId, scriptId], references: [clientId, id], onDelete: Restrict)
+
+  @@unique([scriptId, position])
+  @@index([clientId, scriptId])
+  @@map("script_scenes")
+}
+
+model Recording {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId               String          @map("client_id") @db.Uuid
+  scriptId               String          @map("script_id") @db.Uuid
+  kind                   RecordingKind
+  // So https (CHECK no banco); validacao completa (SSRF, lista de dominios) no servico.
+  externalUrl            String?         @map("external_url")
+  status                 RecordingStatus @default(ENVIADA)
+  submittedById          String          @map("submitted_by_id") @db.Uuid
+  submittedAt            DateTime        @default(now()) @map("submitted_at") @db.Timestamptz(3)
+  imageRightsConfirmedAt DateTime?       @map("image_rights_confirmed_at") @db.Timestamptz(3)
+  // Justificativa do pedido de regravacao (visivel ao cliente).
+  feedback               String?
+  reviewedById           String?         @map("reviewed_by_id") @db.Uuid
+  reviewedAt             DateTime?       @map("reviewed_at") @db.Timestamptz(3)
+
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  script      Script      @relation(fields: [clientId, scriptId], references: [clientId, id], onDelete: Restrict)
+  submittedBy User        @relation("RecordingSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  reviewedBy  User?       @relation("RecordingReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  assetLinks  AssetLink[]
+
+  @@unique([clientId, id])
+  @@index([clientId, scriptId, submittedAt])
+  @@map("recordings")
+}
+
+model Asset {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId       String         @map("client_id") @db.Uuid
+  // clients/<client_id>/<uuid aleatorio>: sem nome original, sem extensao (CHECK no banco).
+  storageKey     String         @map("storage_key")
+  mimeType       String?        @map("mime_type")
+  category       AssetCategory?
+  bytes          BigInt?
+  checksumSha256 String?        @map("checksum_sha256")
+  originalName   String         @map("original_name")
+  uploadedById   String         @map("uploaded_by_id") @db.Uuid
+  status         AssetStatus    @default(PENDENTE)
+  // Pronto para quarentena futura (antivirus fora da fase 2): fica NAO_VERIFICADO.
+  scanStatus     ScanStatus     @default(NAO_VERIFICADO) @map("scan_status")
+  visibility     Visibility     @default(INTERNO)
+  finalizedAt    DateTime?      @map("finalized_at") @db.Timestamptz(3)
+  deletedAt      DateTime?      @map("deleted_at") @db.Timestamptz(3)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client     Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  uploadedBy User        @relation("AssetUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  links      AssetLink[]
+
+  @@unique([storageKey])
+  @@unique([clientId, id])
+  @@index([clientId, status, createdAt])
+  @@map("assets")
+}
+
+// Um arquivo, um destino tipado (CHECK de exatamente um), com FK composta por destino.
+model AssetLink {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId    String        @map("client_id") @db.Uuid
+  assetId     String        @map("asset_id") @db.Uuid
+  versionId   String?       @map("version_id") @db.Uuid
+  scriptId    String?       @map("script_id") @db.Uuid
+  recordingId String?       @map("recording_id") @db.Uuid
+  // Evidencia de publicacao: o destino e o conteudo.
+  contentId   String?       @map("content_id") @db.Uuid
+  role        AssetLinkRole
+  position    Int           @default(0)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client    Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  asset     Asset           @relation(fields: [clientId, assetId], references: [clientId, id], onDelete: Restrict)
+  version   ContentVersion? @relation(fields: [clientId, versionId], references: [clientId, id], onDelete: Restrict)
+  script    Script?         @relation(fields: [clientId, scriptId], references: [clientId, id], onDelete: Restrict)
+  recording Recording?      @relation(fields: [clientId, recordingId], references: [clientId, id], onDelete: Restrict)
+  content   Content?        @relation(fields: [clientId, contentId], references: [clientId, id], onDelete: Restrict)
+
+  @@unique([assetId, versionId])
+  @@unique([assetId, scriptId])
+  @@unique([assetId, recordingId])
+  @@unique([assetId, contentId])
+  @@unique([versionId, role, position])
+  @@index([clientId, assetId])
+  @@index([clientId, versionId])
+  @@index([clientId, scriptId])
+  @@index([clientId, recordingId])
+  @@index([clientId, contentId])
+  @@map("asset_links")
 }

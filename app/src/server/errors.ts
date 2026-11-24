@@ -69,3 +69,15 @@ export class TooManyRequestsError extends AppError {
     super("RATE_LIMITED", 429, "Muitas tentativas. Aguarde um pouco e tente novamente.");
   }
 }
+
+// Regra de dominio recusada (maquina de estados, justificativa ausente...): 422 com o codigo e, quando houver,
+// a lista do que seria permitido. Nunca carrega dado sensivel.
+export class DomainRuleError extends AppError {
+  constructor(
+    code: string,
+    message: string,
+    readonly allowed: readonly string[] = [],
+  ) {
+    super(code, 422, message);
+  }
+}

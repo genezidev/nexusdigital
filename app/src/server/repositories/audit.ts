@@ -77,3 +77,19 @@ export async function listAuditPage(s: SystemScoped, query: { page: number; page
   ]);
   return { items, total, page, pageSize };
 }
+
+/** Auditoria de operacao de catalogo (sem cliente): so em escopo de sistema de ADMIN ou da area da agencia. */
+export async function recordSystemAudit(s: SystemScoped, entry: AuditEntry & { clientId?: string }) {
+  if (s.sys.reason !== "admin" && s.sys.reason !== "staff-area") throw new ForbiddenError();
+  await s.tx.auditLog.create({
+    data: {
+      clientId: entry.clientId ?? null,
+      actorId: s.sys.userId,
+      action: entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      requestId: entry.requestId,
+      diff: sanitizeDiff(entry.diff),
+    },
+  });
+}
