@@ -66,3 +66,17 @@ Mutações manuais (código quebrado de propósito, restaurado depois): remover 
 2. Revisão de segurança com `playbook/varreduras.md`, CSP com nonce, HSTS no proxy da VPS, `TRUST_PROXY=true` atrás do proxy, política de retenção de `rate_limits` (IP).
 3. SMTP real (convite e recuperação de senha); então ligar `isEmailDeliveryAvailable` e testar o reset de ponta a ponta.
 4. Backup e restauração testados antes da fase 5; MFA do admin na fase 5.
+
+## Revisão de segurança independente da fase 1 (2026-11-24, commit 11a49eb)
+
+Somente leitura, sem teste de penetração e sem executar as suítes. Crítico 0, alto 0. Nenhum caminho de leitura ou escrita entre clientes, nem acesso sem login, foi encontrado.
+
+Bloqueiam o deploy em produção:
+- M-1 (médio): limite de tentativas depende do proxy. Com `TRUST_PROXY=false` o login de todos pode ser bloqueado por 5 requisições por minuto. Exigir TRUST_PROXY explícito em produção, usar cabeçalho que só o proxy define, validar o IP e limitar por e-mail.
+- M-3 (médio): não existe script para criar o primeiro ADMIN e a senha do papel `nexo_app` em produção (a migration cita `scripts/preparar-papel-app.mjs`, que não existe).
+- B-3 (baixo): CSP com nonce e HSTS no proxy.
+- M-2 (médio): sem checagem de senha comum nem limite por conta; registrar decisão em DECISOES.md e MFA do admin na fase 5.
+- Gitleaks, Trivy e Semgrep não estão instalados; as varreduras ainda não rodaram. Só `git grep` de padrões, sem segredo real.
+
+Fazer antes da fase 5: B-1 (`REVOKE DELETE ON users FROM nexo_app` ou gatilho em audit_logs, com teste), B-2 (token do convite no log do proxy), `overrides` do `effect` para 3.22.5 (risco aceito de tooling, sem exploração: não está no caminho de requisição; NÃO aceitar o downgrade para prisma 6.12.0 sugerido pelo npm audit), lacunas de teste (reset e troca de senha sem teste de limite, sanitizeDiff, requisição sem Origin, cabeçalhos).
+Segunda revisão independente recomendada para M-1 e B-1.
