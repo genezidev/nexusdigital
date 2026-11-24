@@ -1,0 +1,106 @@
+# Modelo de segurança
+
+Diz a quem revisa o projeto (pessoa, agente ou ferramenta) o que precisa ser protegido, de quem, quais regras nunca podem falhar e o que conta como falha. Preencha quando o sistema tiver login, pagamento, dados pessoais, várias empresas ou arquivos enviados. Revise a cada mudança de exposição (novo domínio, API pública, app mobile) e antes do primeiro deploy.
+
+Não confunda com `SECURITY.md`: o GitHub usa esse nome para a política de como reportar vulnerabilidades.
+
+## Regras de preenchimento
+
+- **Exposição primeiro.** Quem alcança o sistema (internet, só a rede interna, só o app mobile, só o administrador) muda a gravidade de quase tudo. Se não estiver confirmado, diga.
+- **Regra com dono no código.** Cada regra cita o arquivo ou a função que **bloqueia** a violação. Algo que só registra em log ou envia alerta é "monitorado", não "garantido".
+- **Números fixos.** Regras ganham `R-1`, `R-2`… e o número nunca é reaproveitado, para achados e testes citarem a regra.
+- **Exceção estreita e com data.** Cada exclusão nomeia o tipo de falha e o local ("testes em `tests/`"); risco aceito tem data de revisão. "Rotas internas são confiáveis" sem dizer quais esconde falhas reais.
+- **Nada sensível aqui.** Sem segredo, endereço interno, dado de cliente ou falha ainda não corrigida, principalmente se o repositório for público. Dúvidas em aberto vão para o handoff, não para este arquivo.
+- Exclusões, riscos aceitos e gravidades rebaixadas precisam da confirmação do dono do projeto. Sem ela, marque `Sem decisão`: nada é suprimido.
+
+## Modelo
+
+```markdown
+Última revisão: AAAA-MM-DD (ou "rascunho") · Vale para: este repositório
+
+## Sistema e exposição
+<o que o sistema faz, onde roda (web, API, mobile, desktop), quem alcança cada parte, o que fica fora>
+
+## O que proteger
+<dados pessoais, dados de pagamento, credenciais, dados de cada empresa, painel admin, filas, backups>
+
+## Quem acessa e o que pode fazer
+| Quem | Pode | Não pode |
+|---|---|---|
+| Visitante sem login | ver páginas públicas | ler dados de qualquer conta |
+| Usuário de uma empresa | ler e editar dados da própria empresa | ver ou mudar dados de outra empresa |
+| Administrador | ... | ... |
+| Gateway de pagamento (webhook) | avisar mudança de cobrança | mudar plano sem reconsulta na API |
+
+## Entradas que vêm de fora
+<formulários, uploads, webhooks, parâmetros de URL, mensagens, arquivos importados, respostas de IA>
+
+## Regras que nunca podem falhar
+- **R-1** Toda leitura e escrita filtra pela empresa de quem pede. Garantido por: `<arquivo ou função>`. Monitorado por: `<se houver>`.
+- **R-2** Ação que muda dados confere permissão no servidor antes de executar. Garantido por: `<...>`.
+- **R-3** Segredos e tokens nunca aparecem em log, resposta da API ou erro. Garantido por: `<...>`.
+
+Aposentadas: <R-n e motivo, quando houver>
+
+## O que conta como falha
+| Tipo | Regra | Relatar? | Gravidade |
+|---|---|---|---|
+| Ler ou mudar dado de outra empresa | R-1 | Sim | alta; crítica se sem login |
+| Script injetado que só afeta a própria pessoa | — | Não | — |
+| <tipo ainda sem decisão> | — | Sem decisão | padrão da ferramenta |
+
+## Fora do escopo e riscos aceitos
+- <o que, onde> — <por quê>.
+- Risco aceito: <o que, onde> — <por quê>. Revisar em: AAAA-MM-DD.
+
+## Limites conhecidos e compensações
+<proteções que estão fora do código (Cloudflare, painel do provedor, política do banco) e o que depende delas>
+```
+
+## Como usar
+
+- Revisão de segurança, `playbook/varreduras.md` e `playbook/seguranca.md` leem este arquivo para decidir o que é achado e qual a gravidade.
+- Cada regra `R-n` deve ter um teste que falharia se ela fosse quebrada; cite o teste ao lado da regra quando existir.
+- Se o código que uma regra cita mudar de nome ou lugar, atualize a regra no mesmo commit.
+
+---
+
+## Rascunho deste projeto (Nexo Digital)
+
+Última revisão: 2026-11-24 (fase 1, dados e telas) · Vale para: este repositório. R-1 a R-4 e R-6 a R-9 têm dono no código e teste (integração em `nexo_test` e HTTP real contra o app compilado); R-5 aguarda a fase 2.
+
+**Sistema e exposição.** Aplicação web privada, na internet atrás de HTTPS, sem cadastro público. Painel admin e portal do cliente no mesmo sistema. Banco e storage sem porta pública.
+
+**O que proteger.** Dados de cada cliente, contratos e documentos privados, cobranças e comprovantes, gravações de vídeo, credenciais e tokens, auditoria, backups.
+
+| Quem | Pode | Não pode |
+|---|---|---|
+| Visitante sem login | ver `/login` e abrir convite ou reset válido | ler qualquer dado |
+| CLIENT_OWNER / CLIENT_COLLABORATOR | ler dados publicados da própria empresa, conforme papel | ver outra empresa, notas internas, rascunhos; alterar financeiro, métricas ou contrato |
+| STAFF | operar clientes atribuídos, conforme permissões | acessar cliente não atribuído; administração global |
+| ADMIN | todos os clientes, usuários, financeiro e auditoria | consultar senha de alguém; apagar auditoria |
+
+**Regras que nunca podem falhar** (donos no código e testes da fase 1; `app/tests/integration/` e `app/tests/http/`, banco `nexo_test`)
+- **R-1** Toda leitura e escrita filtra pelo cliente da sessão, nunca por `clientId` vindo do navegador. Garantido por: `app/src/server/authorization/context.ts` (`resolveTenantContext` resolve o cliente da sessão e reconfere participação, bloqueio e status a cada requisição), `app/src/server/repositories/*.ts` (todo `where` leva `clientId` da sessão, inclusive por id; repositórios só aceitam `Scoped`, nunca um id solto), no banco, RLS forçada com papel `nexo_app` sem BYPASSRLS (`prisma/migrations/20261124151100_rls_e_papeis`, `app/src/server/db/scope.ts`) e, nas telas e handlers, `app/src/server/services/access.ts` (`resolveAdminClientContext`: a URL `/admin/clients/[id]` é só alvo; id malformado, inexistente ou de cliente não atribuído ao STAFF dá o mesmo 404) e `app/src/app/api/portal/client/route.ts` (não existe parâmetro de cliente: o contexto vem da sessão). Testes: `tenant-isolation.test.ts` (roda na conexão do app e na do dono, que ignora RLS, para provar o filtro de código), `rls.test.ts`, `staff-and-access.test.ts` e, por HTTP real, `tests/http/authorization.test.ts` (usuário do A recebe 403 em todas as rotas `/api/admin/*` e "Acesso negado" nas páginas, sem dado do B; `?clientId=` do B é ignorado; membro e convite do B na rota do A dão 404 e nada muda; STAFF não atribuído recebe 404; troca para cliente alheio dá 403). Limite: nos escopos de sistema (ADMIN entre clientes, convite por token, resolução de sessão, listas do próprio usuário) a RLS não protege; vale o código (D-0004).
+- **R-2** Toda operação confere permissão no servidor, inclusive arquivos, exportações e jobs. Garantido por: `app/src/server/authorization/permissions.ts` (`assertCan`, nega por padrão) chamado dentro de cada função de repositório e serviço; em cada handler e página, `app/src/server/http/actor.ts` (`requireStaffArea`, `requireAdmin`, `requireClientUser`) e `app/src/server/page-session.ts` (o layout nunca é a única barreira); STAFF só entra com participação STAFF ativa (`context.ts`; gatilho `client_members_role_check` no banco). O `proxy.ts` é só a primeira barreira (cookie presente ou não, sem banco). Testes: `tenant-isolation.test.ts`, `staff-and-access.test.ts`, `invitations.test.ts` ("quem só lê não cria convite") e `tests/http/authorization.test.ts` (dono e colaborador não administram; STAFF não cria cliente, não convida, não bloqueia nem lê a auditoria global). Arquivos, exportações e jobs: ainda não existem (fase 2 em diante). Observação da mutação: tirar só a checagem de papel de `resolveAdminClientContext` não derruba teste, porque `requireStaffArea` já barra antes; tirar as duas derruba dois testes.
+- **R-3** Senhas só existem como hash (Argon2id ou bcrypt); convites e resets são de uso único com validade. Garantido por: senha em `accounts.password` com scrypt do Better Auth (decisão D-0005, aceita pelo dono: scrypt equivale a Argon2id/bcrypt); convite em `app/src/server/services/invitations.ts` (só `token_hash`, UPDATE atômico `used_at IS NULL AND expires_at > agora`, 7 dias, mesmo 410 para inexistente, usado, revogado ou expirado); reset por `verification.storeIdentifier: "hashed"` e consumo único em `app/src/server/auth/auth.ts`, com `revokeSessionsOnPasswordReset`. Testes: `invitations.test.ts`, `auth-schema.test.ts` e `tests/http/accounts.test.ts` (convite criado pela API, aberto, aceito, segundo uso 410, token ausente do banco e da auditoria; reset por HTTP com token em hash, uso único e sessões antigas derrubadas).
+- **R-4** Segredos, tokens e senhas nunca aparecem em log, resposta ou erro. Garantido por: repositórios nunca selecionam `token_hash` nem dados de senha (`invitations.ts`, `members.ts`), `sanitizeDiff` remove chaves sensíveis da auditoria (`repositories/audit.ts`), `app/src/server/http/respond.ts` (erro inesperado vira 500 genérico e o log guarda só o tipo, nunca a mensagem; sem stack), `app/src/server/http/dto.ts` (lista explícita de campos), `.env` fora do Git, o link do convite só na resposta da criação e nunca gravado em claro, e o cliente único da API (`app/src/lib/api/client.ts`) descarta campos fora do contrato (inclusive o `token` que o Better Auth devolve no login). Testes: `invitations.test.ts`, `tenant-isolation.test.ts`, `src/server/http/respond.test.ts`, `src/lib/api/client.test.ts` e `tests/http/*` (`expectNoLeak` em toda resposta de erro). Monitorado, não garantido: o Better Auth imprime avisos no stdout do servidor (ex.: "Invalid password", sem o valor); revisar logs de produção antes do deploy.
+- **R-5** Arquivos ficam em storage privado, acessados por URL assinada curta após autorização. Garantido por: a definir (fase 2).
+- **R-6** Requisição que muda estado só vale se vier da própria origem (CSRF), e a sessão fica em cookie HttpOnly, SameSite=Lax (Secure em HTTPS), nunca em `localStorage`. Garantido por: `assertSameOrigin` em `app/src/server/http/handler.ts` (handlers próprios), `trustedOrigins`, `disableOriginCheck: false` e `disableCSRFCheck: false` explícitos em `app/src/server/auth/auth.ts` (o Better Auth desliga a checagem quando a variável `TEST` existe; por isso o app de teste a remove em `scripts/iniciar-app-teste.mjs`) e os atributos de cookie em `auth.ts`. Testes: `tests/http/accounts.test.ts` (Origin de outro site ou ausente dá 403, com cookie válido, no handler próprio e no Better Auth; cookie HttpOnly e SameSite), `e2e/jornada.spec.ts` (nada de token em storage nem em `document.cookie`).
+- **R-7** Login, redefinição, troca de senha e aceite de convite têm limite de tentativas (429), em armazenamento de banco. Garantido por: `rateLimit.storage: "database"` em `auth.ts` (tabela `rate_limits`, migration `20261124200000_tema_e_rate_limit`) e `limitRequests`/`consumeRateLimit` em `app/src/server/http/handler.ts` e `rate-limit.ts` (janela fixa atômica na mesma tabela). Testes: `tests/http/accounts.test.ts` (7 logins errados: os 2 últimos 429, linha em `rate_limits`, outro IP não é afetado; aceite de convite 429 com `Retry-After`). Limite: o IP vem de `x-forwarded-for` só com `TRUST_PROXY=true` (atrás de proxy confiável); sem isso é um balde único por rota.
+- **R-8** Sessão revogada, conta bloqueada, participação revogada e STAFF desatribuído perdem o acesso na requisição seguinte. Garantido por: sessão lida no banco a cada requisição, sem cookie cache (`app/src/server/http/actor.ts`), `resolveTenantContext` e o bloqueio que também apaga as sessões (`app/src/server/services/members.ts`). Testes: `tests/http/authorization.test.ts` e `e2e/estados.spec.ts` (bloquear, encerrar sessões e desbloquear, vistos por outra sessão aberta).
+- **R-9** Não existe cadastro público nem rota administrativa paralela do Better Auth. Garantido por: lista de permissão de rotas em `app/src/app/api/auth/[...all]/route.ts` (o resto responde 404, inclusive `/admin/*` do plugin, que pularia a auditoria do app), `disableSignUp` em `auth.ts` e recusa uniforme (503) do pedido de redefinição enquanto não há envio de e-mail, para não revelar quais e-mails existem. Teste: `tests/http/accounts.test.ts`.
+
+Aposentadas: nenhuma.
+
+**O que conta como falha.** Ler ou mudar dado de outro cliente (R-1): relatar, gravidade alta (crítica sem login). Acesso a `/admin` ou ação administrativa por quem não é ADMIN/STAFF (R-2), aceitar mudança de estado de outra origem (R-6) e acesso após revogação, bloqueio ou desatribuição (R-8): relatar, gravidade alta. Demais tipos: Sem decisão.
+
+**Limites conhecidos e compensações (telas, 2026-11-24).**
+- Com Cache Components, uma página que decide acesso depois de começar a transmitir devolve status 200 com a tela "Acesso negado" (ou o redirecionamento no corpo). Os handlers de API devolvem 401, 403, 404, 409, 410, 422 e 429 de verdade. A decisão de acesso é a mesma e não vaza dado.
+- O `proxy.ts` só confere a presença do cookie; quem decide é o servidor.
+- Sem CSP com nonce e sem HSTS ainda (HSTS é do proxy HTTPS da VPS). A CSP entra na revisão de `playbook/varreduras.md` antes do primeiro deploy.
+- Nenhuma revisão com `playbook/varreduras.md`, teste de carga ou teste de penetração foi feita.
+
+---
+
+Estrutura inspirada na skill `security-model` das [skills da Sentry](https://github.com/getsentry/skills) (Apache-2.0), que por sua vez adapta a `define-security-policy` do [openai/codex-security](https://github.com/openai/codex-security) (Apache-2.0). Texto reescrito e simplificado em português pela base.

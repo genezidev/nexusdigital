@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Tokens de design/DESIGN.md em variaveis CSS. Componentes usam o NOME FUNCIONAL (bg-primary, text-muted-foreground),
+ * nunca o codigo da cor. Desvios de contraste (WCAG AA) em relacao ao DESIGN.md estao registrados la:
+ * texto secundario claro #5B6B80 (o #64748B da 4,40:1 sobre o fundo), erro e texto de estado em tons mais escuros no tema claro.
+ */
+:root {
+  --background: #f4f6fa;
+  --foreground: #18243a;
+  --card: #ffffff;
+  --card-foreground: #18243a;
+  --popover: #ffffff;
+  --popover-foreground: #18243a;
+  --primary: #315de0;
+  --primary-foreground: #ffffff;
+  --secondary: #e8ecf4;
+  --secondary-foreground: #18243a;
+  --muted: #eaeef5;
+  --muted-foreground: #5b6b80;
+  --accent: #e3e9f6;
+  --accent-foreground: #18243a;
+  --destructive: #b91c1c;
+  --destructive-foreground: #ffffff;
+  --success: #15803d;
+  --success-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+  --border: #e2e7ef;
+  --input: #77869b;
+  --ring: #315de0;
+  --sidebar: #101b30;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-muted: #a8b5c8;
+  --sidebar-accent: #1c2b48;
+  --sidebar-primary: #83a4ff;
+  --sidebar-border: #243452;
+  --radius: 0.5rem;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0b1220;
+  --foreground: #f1f5f9;
+  --card: #17243a;
+  --card-foreground: #f1f5f9;
+  --popover: #17243a;
+  --popover-foreground: #f1f5f9;
+  --primary: #83a4ff;
+  --primary-foreground: #0b1220;
+  --secondary: #1f2f4a;
+  --secondary-foreground: #f1f5f9;
+  --muted: #1b2a43;
+  --muted-foreground: #a8b5c8;
+  --accent: #223454;
+  --accent-foreground: #f1f5f9;
+  --destructive: #f87171;
+  --destructive-foreground: #0b1220;
+  --success: #4ade80;
+  --success-foreground: #0b1220;
+  --warning: #fbbf24;
+  --warning-foreground: #0b1220;
+  --border: #334155;
+  --input: #7d8ca3;
+  --ring: #83a4ff;
+  --sidebar: #101b30;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-muted: #a8b5c8;
+  --sidebar-accent: #1c2b48;
+  --sidebar-primary: #83a4ff;
+  --sidebar-border: #243452;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-border: var(--sidebar-border);
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Raios do DESIGN.md: 8px (botoes e campos), 12px (cards), 16px (modais e paineis). */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  h1 {
+    @apply text-2xl font-bold tracking-tight sm:text-[1.75rem];
+    line-height: 1.25;
+  }
+  h2 {
+    @apply text-xl font-semibold;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+}
+
+/* Movimento reduzido: sem transicoes nem animacoes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

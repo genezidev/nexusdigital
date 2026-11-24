@@ -1,0 +1,6 @@
+---
+name: scaff-orquestrar
+description: "Conduz o projeto pelas fases com a equipe de agentes scaff-*, parando só em decisões caras. Use quando a pessoa pedir para construir o sistema de ponta a ponta, coordenar a equipe ou seguir para a próxima fase."
+---
+
+Siga playbook/equipe.md. Leia contexto/HANDOFF.md e a spec ativa para saber a fase atual. Avance pelas fases (entrevista, spec, arquitetura, design, fundação, módulos, qualidade, segurança, publicação, lojas, operação), usando a skill de cada fase indicada no guia, e chame o agente scaff-* da fase só quando a delegação ganhar algo: revisão independente, trabalho em paralelo com arquivos separados ou leitura extensa; o resto faça direto. Ao chamar, passe objetivo, critério da spec, arquivos para ler e alterar, decisões que não mudam e como provar. Confira cada entrega você mesmo (diff, checagens de quality/checks.json e evidência de playbook/revisao.md), porque relatório de agente não é prova. Um arquivo tem um autor por vez. Pare e pergunte à pessoa, com opções simples e a recomendada primeiro, só antes de decisões caras: stack, pagamento, domínio, credenciais, custos, publicação, migração ou exclusão de dados reais; registre a escolha em contexto/DECISOES.md. Ao fim de cada fase, atualize o handoff e diga à pessoa o que ficou pronto e o que vem depois.

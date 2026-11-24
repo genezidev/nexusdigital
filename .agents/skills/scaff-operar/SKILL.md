@@ -1,0 +1,6 @@
+---
+name: scaff-operar
+description: "Mantém o sistema no ar depois de publicado: monitoramento, backups, atualizações de segurança, custos e incidentes. Use na rotina de operação, quando algo cair ou ao revisar o sistema em produção."
+---
+
+Mantenha contexto/OPERACAO.md a partir de modelos/OPERACAO.md: onde roda, como monitorar, a rotina e o que fazer em incidente, sem nenhum valor de segredo. Monte erros, disponibilidade, logs e alertas como em playbook/saas/monitoramento.md. Na rotina, confira alertas e erros, se o backup rodou e, de tempos em tempos, a restauração num ambiente de teste; rode python scripts/conferir_versoes.py e a varredura de dependências de playbook/varreduras.md, aplicando atualizações de segurança primeiro em staging. Revise custos, vencimentos (domínio, certificados, contas de loja) e acessos de quem saiu. Em incidente, confirme o problema, avise a pessoa e contenha antes de investigar (voltar a versão ou desligar a funcionalidade, como no plano de volta da release); depois corrija com um teste que reproduz a falha e registre causa e prevenção; vazamento de dados pessoais segue o prazo de comunicação de playbook/saas/lgpd.md. Pedidos de quem usa sobre os próprios dados seguem playbook/saas/lgpd.md. Ação em produção só com autorização explícita da pessoa.

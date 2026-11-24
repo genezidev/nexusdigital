@@ -1,0 +1,6 @@
+---
+name: scaff-publicar
+description: "Prepara e conduz a publicação de uma versão: checklist de release, staging, backup, plano de volta e autorização. Use quando uma entrega estiver pronta para ir ao ar ou para lançar uma nova versão."
+---
+
+Copie modelos/RELEASE.md para releases/<versão>.md e marque cada item só com a evidência ao lado. Antes, rode scaff-verificar, peça revisão independente e as varreduras de playbook/varreduras.md; na primeira vez em produção, percorra playbook/seguranca.md. Escolha o destino com playbook/publicacao/README.md (VPS com Coolify, Vercel + Supabase, Cloudflare na frente) e confira preços e limites na data. Para web e SaaS use playbook/saas/lancamento.md; para VPS, scaff-vps e playbook/vps.md; para domínio e HTTPS, playbook/publicacao/cloudflare.md; para lojas de aplicativos, scaff-lojas. Publique primeiro em staging com o mesmo artefato e dados de teste, teste a jornada principal e confirme backup com restauração testada e o plano de volta escrito. Produção, domínio, DNS, envio para revisão de loja e qualquer custo novo só com autorização explícita da pessoa na conversa, depois de mostrar o que vai acontecer e como voltar. Depois de publicar, confira a jornada principal e os erros, registre versão, comandos e resultados no handoff e siga com scaff-operar.

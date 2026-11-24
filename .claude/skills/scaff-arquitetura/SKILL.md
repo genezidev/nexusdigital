@@ -1,0 +1,6 @@
+---
+name: scaff-arquitetura
+description: "Propõe a stack, a estrutura e as decisões caras de reverter a partir da spec, com opções e custos. Use depois da spec e antes de criar o projeto, ou quando uma mudança afetar a arquitetura."
+---
+
+Leia a spec, contexto/PROJETO.md, a matriz de playbook/perfis.md, o guia do perfil em playbook/stacks/ e, se houver contas ou cobrança, playbook/saas/README.md. Liste o que decide a stack: onde a pessoa usa (navegador, celular, computador), dados e permissões, integrações, volume, orçamento e quem vai manter. Para cada decisão cara (stack, banco, autenticação, hospedagem, gateway), registre em contexto/DECISOES.md duas ou três opções com custo mensal estimado e datado, riscos e como conferir; quando nada no briefing pedir outra, recomende o começo indicado em playbook/perfis.md, com as versões do guia do perfil conferidas de novo. Confira versões na documentação oficial e com python scripts/conferir_versoes.py <nome>. Apresente as opções à pessoa em linguagem simples, a recomendada primeiro, e só siga para a fundação depois que a escolha estiver registrada como aceita. Defina os limites dos módulos, o sentido das dependências e a checagem que protege essa estrutura em quality/checks.json. Com login, pagamento, dados pessoais ou várias empresas, atualize contexto/MODELO-DE-SEGURANCA.md.

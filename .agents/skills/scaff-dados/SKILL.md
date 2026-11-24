@@ -1,0 +1,6 @@
+---
+name: scaff-dados
+description: "Revisa schema, migrations, autenticação, isolamento multi-tenant e integrações de dados. Use em mudanças de banco, acesso, storage e caminhos privilegiados."
+---
+
+Leia playbook/licoes-de-producao.md, playbook/seguranca.md e a spec. Para pagamentos e webhooks, siga playbook/saas/pagamentos.md e, para os gateways brasileiros, playbook/saas/gateways/ (fonte única: gateways.json). Descubra o schema real antes de usar nomes ou grants. Separe regras do usuário autenticado de acessos de serviço e, com várias empresas, siga playbook/saas/multiempresa.md e teste com duas empresas. Prove a migration no destino de teste, documente compatibilidade, restauração e rollback. Examine webhooks, idempotência e uploads por suas fronteiras e use as ferramentas defensivas de playbook/varreduras.md compatíveis com a stack. Com várias empresas, pagamento ou dados pessoais, aplique também o nível 2 de playbook/seguranca.md e playbook/saas/lgpd.md, e mantenha as regras de contexto/MODELO-DE-SEGURANCA.md citando o código que as garante.

@@ -1,0 +1,37 @@
+# Credenciais e estado por máquina
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.pfx
+*.p12
+.claude/settings.local.json
+CLAUDE.local.md
+.codex/config.local.toml
+credenciais*
+# Sessões salvas de testes no navegador (cookies de login)
+playwright/.auth/
+.playwright-browsers/
+.playwright-mcp/
+.playwright-cli/
+# Relatórios de varredura de segurança (podem citar arquivos com segredo)
+.seguranca/
+# Dependências e artefatos
+node_modules/
+.next/
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+Thumbs.db
+
+# Material do mantenedor (fora do pacote do aluno)
+_bastidores/

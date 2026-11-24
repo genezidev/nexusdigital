@@ -1,0 +1,542 @@
+{
+  "versao": "2026-11-23",
+  "observacao": "Definição única dos gateways para gerar a tela de configuração, as variáveis de ambiente e os testes em qualquer stack. Conferido na documentação oficial em 2026-11-22; reconfira antes de produção. {URL_PUBLICA} é a URL pública do app.",
+  "gateways": [
+    {
+      "id": "greenn",
+      "nome": "Greenn",
+      "descricao": "Plataforma de vendas com checkout próprio e assinaturas recorrentes.",
+      "metodos": [
+        "cartao",
+        "pix",
+        "boleto"
+      ],
+      "modelo": "checkout-da-plataforma",
+      "sandbox": {
+        "existe": false,
+        "como_testar": "API pública v1 e webhooks clássicos não têm sandbox: produto de valor baixo em produção, compra real e reembolso pelo painel. A API Pagamento v2 (checkout por API, com onboarding na Greenn) tem sandbox, desligado todo dia a partir das 20h de Brasília."
+      },
+      "api": {
+        "base_producao": "https://apiadm.greenn.com.br/api/v1",
+        "autenticacao": "Authorization: Bearer <token grn_live_>",
+        "documentacao": "https://apiadm.greenn.com.br/docs/api (OpenAPI em https://apiadm.greenn.com.br/docs/api.json)",
+        "rotas_leitura": [
+          "GET /sales (filtros filter[...], page, per_page)",
+          "GET /sales/{id} (id numérico; valores em *_cents)",
+          "GET /products",
+          "GET /products/{id}",
+          "GET /offers"
+        ],
+        "sem_rota_de_assinatura": "A API v1 não tem rota de leitura de assinatura/contrato: o estado vem do webhook contractUpdated; confira a última venda em GET /sales/{id}.",
+        "limite": "Excesso de requisições responde 429."
+      },
+      "campos": [
+        {
+          "chave": "api_token",
+          "rotulo": "Token de API",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo": "grn_live_",
+          "env": "GREENN_API_TOKEN",
+          "ajuda": "Sistema > Tokens e Api Key > Integrações e Tokens > Criar token. Aparece uma única vez."
+        },
+        {
+          "chave": "webhook_segredo_url",
+          "rotulo": "Segredo extra na URL (opcional)",
+          "secreto": true,
+          "obrigatorio": false,
+          "gerado_pelo_app": true,
+          "env": "GREENN_WEBHOOK_SECRET",
+          "ajuda": "Camada extra opcional. A validação principal é o header X-Webhook-Token."
+        },
+        {
+          "chave": "webhook_token",
+          "rotulo": "Webhook Token",
+          "secreto": true,
+          "obrigatorio": true,
+          "env": "GREENN_WEBHOOK_TOKEN",
+          "ajuda": "Sistema > Tokens e Api Key > Integrações e Tokens > Webhook Token. A Greenn envia esse valor no header X-Webhook-Token de todo webhook; compare em tempo constante antes de processar."
+        },
+        {
+          "chave": "seller_id",
+          "rotulo": "Seller ID (opcional)",
+          "secreto": false,
+          "obrigatorio": false,
+          "env": "GREENN_SELLER_ID",
+          "ajuda": "Se preenchido, o webhook só é aceito quando sale.seller_id for igual."
+        },
+        {
+          "chave": "links_checkout",
+          "rotulo": "Link de checkout por plano",
+          "secreto": false,
+          "obrigatorio": true,
+          "tipo": "mapa-plano-url",
+          "ajuda": "A API pública v1 não cria cobrança: cada plano do app aponta para o link da oferta na Greenn. Criar venda por API exige a API Pagamento v2 (onboarding com a Greenn)."
+        }
+      ],
+      "webhook": {
+        "url": "{URL_PUBLICA}/api/webhooks/greenn",
+        "onde_cadastrar": "Produtos > Meus Produtos > engrenagem > Entrega e integrações > Adicionar entrega > Webhook (por produto)",
+        "validacao": "Header X-Webhook-Token igual ao Webhook Token salvo (comparação em tempo constante) + conferir a venda em GET /sales/{id} antes de liberar acesso",
+        "tipos": {
+          "sale": "event saleUpdated",
+          "contract": "event contractUpdated",
+          "lead": "event checkoutAbandoned"
+        },
+        "eventos": {
+          "venda": [
+            "paid",
+            "waiting_payment",
+            "refused",
+            "refunded",
+            "chargedback",
+            "unpaid"
+          ],
+          "assinatura": [
+            "paid",
+            "trialing",
+            "pending_payment",
+            "unpaid",
+            "canceled",
+            "ended"
+          ]
+        },
+        "cuidados": [
+          "Use currentStatus; oldStatus pode vir igual ao currentStatus",
+          "productMetas e proposalMetas vêm como [] quando vazios e como objeto quando preenchidos"
+        ],
+        "identificadores": [
+          "type (sale|contract|lead)",
+          "sale.id",
+          "contract.id",
+          "client.id",
+          "seller.id"
+        ],
+        "reenvio_api_pagamento_v2": "Nos webhooks da API Pagamento v2 (saleStatusChanged, subscriptionStatusChanged): responder 2xx em até 30s; sem 2xx a Greenn retenta automaticamente e depois só por pedido manual; entrega pelo menos uma vez, deduplicar."
+      },
+      "teste_conexao": "GET /sales?per_page=1 com o token (401/403 = token inválido ou sem escopo de leitura de vendas; 429 = limite).",
+      "a_confirmar": [
+        "Política de reenvio dos webhooks clássicos (saleUpdated, contractUpdated): a documentação só descreve o reenvio dos webhooks da API Pagamento v2",
+        "Se o boleto está liberado na conta do vendedor (o campo method aceita BOLETO e as ofertas têm parcelamento de boleto)"
+      ],
+      "conferido_em": "2026-11-23, na documentação OpenAPI pública (apiadm.greenn.com.br/docs/api.json)"
+    },
+    {
+      "id": "asaas",
+      "nome": "Asaas",
+      "descricao": "Boleto, Pix e cartão com assinaturas e conciliação automática.",
+      "metodos": [
+        "pix",
+        "cartao",
+        "boleto"
+      ],
+      "modelo": "api-com-link-ou-checkout",
+      "sandbox": {
+        "existe": true,
+        "detectar_pela_chave": true,
+        "como_testar": "Conta sandbox separada; confirmação manual de cobranças no painel sandbox; cartões de teste."
+      },
+      "api": {
+        "base_sandbox": "https://api-sandbox.asaas.com/v3",
+        "base_producao": "https://api.asaas.com/v3",
+        "autenticacao": "Header access_token: <chave> e User-Agent obrigatório"
+      },
+      "campos": [
+        {
+          "chave": "api_key",
+          "rotulo": "API Key",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo_sandbox": "$aact_hmlg_",
+          "prefixo_producao": "$aact_prod_",
+          "env": "ASAAS_API_KEY"
+        },
+        {
+          "chave": "webhook_token",
+          "rotulo": "Token do webhook",
+          "secreto": true,
+          "obrigatorio": true,
+          "tamanho": [
+            32,
+            255
+          ],
+          "gerado_pelo_app": true,
+          "env": "ASAAS_WEBHOOK_TOKEN",
+          "ajuda": "Enviado pelo Asaas no header asaas-access-token. Não use a API Key aqui."
+        }
+      ],
+      "webhook": {
+        "url": "{URL_PUBLICA}/api/webhooks/asaas",
+        "onde_cadastrar": "Painel Asaas > Integrações > Webhooks, ou POST /v3/webhooks (até 10 por conta)",
+        "validacao": "Comparar header asaas-access-token com o token salvo; deduplicar pelo id do evento",
+        "eventos": [
+          "PAYMENT_CREATED",
+          "PAYMENT_CONFIRMED",
+          "PAYMENT_RECEIVED",
+          "PAYMENT_OVERDUE",
+          "PAYMENT_REFUNDED",
+          "PAYMENT_DELETED",
+          "SUBSCRIPTION_CREATED",
+          "SUBSCRIPTION_UPDATED",
+          "SUBSCRIPTION_INACTIVATED",
+          "SUBSCRIPTION_DELETED"
+        ]
+      },
+      "teste_conexao": "GET /v3/myAccount/commercialInfo/ (401 = chave inválida)",
+      "dados_teste": {
+        "cartao_aprovado": [
+          "4539 6560 4839 2220",
+          "5263 8372 5327 8275"
+        ],
+        "cartao_recusado": [
+          "5184 0197 4037 3151",
+          "4916 5613 5824 0741"
+        ],
+        "validade_cvv": "qualquer data futura e CVV fictício"
+      }
+    },
+    {
+      "id": "stripe",
+      "nome": "Stripe",
+      "descricao": "Cartão, Pix e boleto com página de pagamento hospedada (conta Stripe no Brasil).",
+      "metodos": [
+        "cartao",
+        "pix",
+        "boleto"
+      ],
+      "modelo": "checkout-hospedado",
+      "sandbox": {
+        "existe": true,
+        "detectar_pela_chave": true,
+        "como_testar": "Chaves sk_test_/pk_test_, cartões de teste e Stripe CLI (stripe listen / stripe trigger)."
+      },
+      "api": {
+        "base": "https://api.stripe.com/v1",
+        "autenticacao": "Basic com a chave secreta como usuário (ou Bearer)"
+      },
+      "campos": [
+        {
+          "chave": "secret_key",
+          "rotulo": "Secret Key (ou Restricted Key)",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo_sandbox": [
+            "sk_test_",
+            "rk_test_"
+          ],
+          "prefixo_producao": [
+            "sk_live_",
+            "rk_live_"
+          ],
+          "env": "STRIPE_SECRET_KEY",
+          "ajuda": "Prefira uma restricted key com só as permissões necessárias."
+        },
+        {
+          "chave": "publishable_key",
+          "rotulo": "Publishable Key",
+          "secreto": false,
+          "obrigatorio": true,
+          "prefixo_sandbox": "pk_test_",
+          "prefixo_producao": "pk_live_",
+          "env": "STRIPE_PUBLISHABLE_KEY"
+        },
+        {
+          "chave": "webhook_secret",
+          "rotulo": "Webhook Secret",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo": "whsec_",
+          "env": "STRIPE_WEBHOOK_SECRET"
+        }
+      ],
+      "webhook": {
+        "url": "{URL_PUBLICA}/api/webhooks/stripe",
+        "onde_cadastrar": "Dashboard > Workbench > Webhooks (um endpoint por ambiente)",
+        "validacao": "Header Stripe-Signature com o whsec_, usando o corpo bruto da requisição",
+        "eventos": [
+          "checkout.session.completed",
+          "checkout.session.async_payment_succeeded",
+          "checkout.session.async_payment_failed",
+          "invoice.paid",
+          "invoice.payment_failed",
+          "invoice.payment_action_required",
+          "customer.subscription.created",
+          "customer.subscription.updated",
+          "customer.subscription.deleted",
+          "charge.refunded",
+          "charge.dispute.created"
+        ]
+      },
+      "teste_conexao": "GET /v1/balance (a resposta traz livemode, que confirma o ambiente)",
+      "observacoes": [
+        "Pix: mínimo R$ 0,50; recorrência via Pix Automático",
+        "Boleto: R$ 5,00 a R$ 49.999,99, vence em 3 dias por padrão, sem reembolso"
+      ]
+    },
+    {
+      "id": "pagarme",
+      "nome": "Pagar.me",
+      "descricao": "Cartão, Pix e boleto com API v5, assinaturas e link de checkout.",
+      "metodos": [
+        "cartao",
+        "pix",
+        "boleto"
+      ],
+      "modelo": "api-com-link-ou-checkout",
+      "sandbox": {
+        "existe": true,
+        "detectar_pela_chave": true,
+        "como_testar": "Chaves sk_test_ ativam o simulador na mesma URL."
+      },
+      "api": {
+        "base": "https://api.pagar.me/core/v5",
+        "autenticacao": "Basic com a Secret Key como usuário e senha vazia"
+      },
+      "campos": [
+        {
+          "chave": "secret_key",
+          "rotulo": "Secret Key",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo_sandbox": "sk_test_",
+          "prefixo_producao": "sk_",
+          "env": "PAGARME_SECRET_KEY"
+        },
+        {
+          "chave": "public_key",
+          "rotulo": "Public Key",
+          "secreto": false,
+          "obrigatorio": false,
+          "prefixo_sandbox": "pk_test_",
+          "prefixo_producao": "pk_",
+          "env": "PAGARME_PUBLIC_KEY",
+          "ajuda": "Necessária só para tokenizar cartão na própria página."
+        },
+        {
+          "chave": "webhook_segredo_url",
+          "rotulo": "Segredo da URL do webhook",
+          "secreto": true,
+          "obrigatorio": true,
+          "gerado_pelo_app": true,
+          "env": "PAGARME_WEBHOOK_SECRET",
+          "ajuda": "A documentação v5 lida não descreve assinatura de webhook: o app valida um segredo na URL e reconsulta a cobrança."
+        }
+      ],
+      "webhook": {
+        "url": "{URL_PUBLICA}/api/webhooks/pagarme?secret=<webhook_segredo_url>",
+        "onde_cadastrar": "Dashboard Pagar.me > Configurações > Webhooks",
+        "validacao": "Segredo na URL + GET /charges/{id} (ou /orders/{id}) antes de aplicar",
+        "eventos": [
+          "order.paid",
+          "order.payment_failed",
+          "order.canceled",
+          "charge.paid",
+          "charge.payment_failed",
+          "charge.refunded",
+          "charge.partial_canceled",
+          "charge.chargedback",
+          "subscription.created",
+          "subscription.canceled",
+          "invoice.paid",
+          "invoice.payment_failed"
+        ]
+      },
+      "teste_conexao": "GET /customers?size=1 com a Secret Key (401 = inválida). Rota de leitura a confirmar na referência.",
+      "dados_teste": {
+        "cartao_aprovado": "4000 0000 0000 0010",
+        "cartao_recusado": "4000 0000 0000 0028",
+        "cartao_processando_depois_aprova": "4000 0000 0000 0036",
+        "pix": "até R$ 500,00 é pago automaticamente; acima falha"
+      }
+    },
+    {
+      "id": "mercadopago",
+      "nome": "Mercado Pago",
+      "descricao": "Pix com QR Code, cartão e boleto; Checkout Pro hospedado ou Checkout Transparente.",
+      "metodos": [
+        "pix",
+        "cartao",
+        "boleto"
+      ],
+      "modelo": "api-com-link-ou-checkout",
+      "sandbox": {
+        "existe": true,
+        "detectar_pela_chave": false,
+        "como_testar": "Credenciais de teste (também começam com APP_USR-), cartões de teste com nome do titular APRO/OTHE etc."
+      },
+      "api": {
+        "base": "https://api.mercadopago.com",
+        "autenticacao": "Authorization: Bearer <access_token>; X-Idempotency-Key obrigatório ao criar pagamento"
+      },
+      "campos": [
+        {
+          "chave": "access_token",
+          "rotulo": "Access Token",
+          "secreto": true,
+          "obrigatorio": true,
+          "prefixo": "APP_USR-",
+          "env": "MERCADOPAGO_ACCESS_TOKEN"
+        },
+        {
+          "chave": "public_key",
+          "rotulo": "Public Key",
+          "secreto": false,
+          "obrigatorio": false,
+          "prefixo": "APP_USR-",
+          "env": "MERCADOPAGO_PUBLIC_KEY",
+          "ajuda": "Necessária só para Checkout Transparente/Bricks na própria página."
+        },
+        {
+          "chave": "webhook_secret",
+          "rotulo": "Assinatura secreta do webhook",
+          "secreto": true,
+          "obrigatorio": true,
+          "env": "MERCADOPAGO_WEBHOOK_SECRET",
+          "ajuda": "Suas integrações > aplicação > Webhooks > Configurar notificações."
+        },
+        {
+          "chave": "sandbox",
+          "rotulo": "Credenciais de teste",
+          "tipo": "booleano",
+          "obrigatorio": true,
+          "ajuda": "Obrigatório marcar manualmente: o prefixo não diferencia teste de produção."
+        }
+      ],
+      "webhook": {
+        "url": "{URL_PUBLICA}/api/webhooks/mercadopago",
+        "onde_cadastrar": "Suas integrações > aplicação > Webhooks (URL de teste e de produção separadas)",
+        "validacao": "Header x-signature (ts, v1) + x-request-id + data.id da query; HMAC com a assinatura secreta. Use o validador do SDK oficial. Depois GET /v1/payments/{id}.",
+        "eventos": [
+          "payment",
+          "subscription_preapproval",
+          "subscription_preapproval_plan",
+          "subscription_authorized_payment",
+          "order"
+        ],
+        "prazo_resposta": "200/201 em até 22 segundos"
+      },
+      "teste_conexao": "GET /users/me com o Access Token (a confirmar na referência)",
+      "dados_teste": {
+        "cartoes": {
+          "visa": "4235 6477 2802 5682",
+          "mastercard": "5480 8328 0103 3311"
+        },
+        "cvv_validade": "123 e 11/30",
+        "titular": "APRO aprova, OTHE recusa, CONT pendente, FUND saldo insuficiente",
+        "cpf": "12345678909",
+        "pix": "first_name APRO aprova automaticamente"
+      },
+      "observacoes": [
+        "A validação por assinatura secreta não se aplica a notificações de QR e assinaturas configuradas em Suas integrações"
+      ]
+    },
+    {
+      "id": "efi",
+      "nome": "Efí",
+      "descricao": "Pix imediato com QR Code (API Pix) e boleto, cartão, carnê e assinaturas (API Cobranças).",
+      "metodos": [
+        "pix",
+        "cartao",
+        "boleto"
+      ],
+      "modelo": "api-com-link-ou-checkout",
+      "sandbox": {
+        "existe": true,
+        "detectar_pela_chave": false,
+        "como_testar": "Credenciais e certificado de Homologação; Pix de R$ 0,01 a R$ 10,00 é confirmado e dispara webhook; cartões de teste pelo último dígito."
+      },
+      "api": {
+        "pix": {
+          "base_sandbox": "https://pix-h.api.efipay.com.br",
+          "base_producao": "https://pix.api.efipay.com.br",
+          "autenticacao": "POST /oauth/token com Basic client_id:client_secret + certificado mTLS"
+        },
+        "cobrancas": {
+          "base_sandbox": "https://cobrancas-h.api.efipay.com.br",
+          "base_producao": "https://cobrancas.api.efipay.com.br",
+          "autenticacao": "POST /v1/authorize com Basic client_id:client_secret"
+        }
+      },
+      "campos": [
+        {
+          "chave": "client_id",
+          "rotulo": "Client ID",
+          "secreto": false,
+          "obrigatorio": true,
+          "env": "EFI_CLIENT_ID",
+          "ajuda": "Um par para Produção e outro para Homologação."
+        },
+        {
+          "chave": "client_secret",
+          "rotulo": "Client Secret",
+          "secreto": true,
+          "obrigatorio": true,
+          "env": "EFI_CLIENT_SECRET"
+        },
+        {
+          "chave": "certificado_p12",
+          "rotulo": "Certificado .p12",
+          "secreto": true,
+          "obrigatorio_para": [
+            "pix"
+          ],
+          "tipo": "arquivo",
+          "env": "EFI_CERT_P12_BASE64",
+          "ajuda": "Gerado por ambiente e baixado uma única vez. Guarde criptografado."
+        },
+        {
+          "chave": "chave_pix",
+          "rotulo": "Chave Pix",
+          "secreto": false,
+          "obrigatorio_para": [
+            "pix"
+          ],
+          "env": "EFI_PIX_KEY",
+          "ajuda": "Precisa pertencer à conta Efí autenticada."
+        },
+        {
+          "chave": "identificador_conta",
+          "rotulo": "Identificador de conta (payee code)",
+          "secreto": false,
+          "obrigatorio_para": [
+            "cartao"
+          ],
+          "env": "EFI_ACCOUNT_ID",
+          "ajuda": "API > Introdução > Identificador de conta. Usado no front para gerar o payment_token do cartão."
+        },
+        {
+          "chave": "webhook_segredo_url",
+          "rotulo": "Segredo HMAC do webhook",
+          "secreto": true,
+          "obrigatorio": true,
+          "gerado_pelo_app": true,
+          "env": "EFI_WEBHOOK_SECRET"
+        },
+        {
+          "chave": "sandbox",
+          "rotulo": "Homologação",
+          "tipo": "booleano",
+          "obrigatorio": true
+        }
+      ],
+      "webhook": {
+        "pix": {
+          "url": "{URL_PUBLICA}/api/webhooks/efi?hmac=<webhook_segredo_url>&ignorar=",
+          "onde_cadastrar": "Pelo app ao salvar: PUT /v2/webhook/{chave} (escopo webhook.write). Sem &ignorar= a Efí acrescenta /pix à URL.",
+          "validacao": "mTLS com a cadeia de certificados da Efí no servidor que recebe; quando não for possível, HMAC na query + lista de IPs da Efí + reconsulta da cobrança",
+          "prazo_resposta": "2xx em até 60 segundos; até 9 reenvios"
+        },
+        "cobrancas": {
+          "url": "{URL_PUBLICA}/api/webhooks/efi-cobrancas?hmac=<webhook_segredo_url>",
+          "onde_cadastrar": "notification_url enviada ao criar a cobrança",
+          "validacao": "O POST traz só um token; buscar detalhes em GET /v1/notification/{token}"
+        }
+      },
+      "teste_conexao": "Pix: POST /oauth/token com certificado. Cobranças: POST /v1/authorize.",
+      "dados_teste": {
+        "pix": "valor de R$ 0,01 a R$ 10,00 é pago em homologação",
+        "cartao_ultimo_digito": "4 a 9 aprova; 1, 2, 3 recusa; 0 pede 3DS (código 0001 aprova)"
+      }
+    }
+  ]
+}

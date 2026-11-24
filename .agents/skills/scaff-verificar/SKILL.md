@@ -1,0 +1,6 @@
+---
+name: scaff-verificar
+description: "Planeja e executa checagens de aceite, testes, build e CI. Use na revisão antes do PR ou ao investigar uma falha de execução."
+---
+
+Vincule cada critério a um teste ou evidência. Leia os scripts reais do projeto e revise quality/checks.json. Use python scripts/verificar.py para examinar a configuração e --executar para rodar comandos autorizados em teste. Investigue a primeira falha reproduzível e mantenha a causa e a verificação no handoff. Siga playbook/revisao.md: não declare pronto sem rodar agora o comando que prova, revise casos não tratados e lacunas de teste, e compare a spec item por item com o código. Antes do primeiro deploy em produção, percorra playbook/seguranca.md e rode as varreduras de playbook/varreduras.md (segredos, dependências, código e, no mobile, o pacote gerado), tratando cada achado como confirmado, a validar ou descartado. A base valida seu metadata em PR. Acrescente os jobs da stack com permissões mínimas após o bootstrap.

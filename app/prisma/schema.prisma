@@ -1,0 +1,229 @@
+// Schema do Nexo Digital (fase 1). As tabelas user/session/account/verification foram geradas
+// pelo CLI do Better Auth 1.7.27 (`auth generate --adapter prisma`, plugin admin) e ajustadas:
+// ids UUID, nomes em snake_case plural e enums. Ver contexto/DECISOES.md (D-0004, D-0005).
+// Colunas de data sao timestamptz (UTC). Isolamento: client_id + RLS (migration 0001).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GlobalRole {
+  ADMIN
+  STAFF
+  USER
+}
+
+// Preferencia de tema, gravada por usuario (migration 20261124200000).
+enum ThemePreference {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Papel da pessoa dentro de um cliente. STAFF aqui significa "atribuido a este cliente".
+enum MemberRole {
+  STAFF
+  CLIENT_OWNER
+  CLIENT_COLLABORATOR
+}
+
+enum MemberStatus {
+  ACTIVE
+  REVOKED
+}
+
+// ---------- Better Auth (gerado) ----------
+
+model User {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  email         String
+  emailVerified Boolean    @default(false) @map("email_verified")
+  image         String?
+  role          GlobalRole @default(USER)
+  banned        Boolean    @default(false)
+  banReason     String?    @map("ban_reason")
+  banExpires    DateTime?  @map("ban_expires") @db.Timestamptz(3)
+  lastLoginAt   DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  themePreference ThemePreference @default(SYSTEM) @map("theme_preference")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions            Session[]
+  accounts            Account[]
+  memberships         ClientMember[]
+  invitationsSent     Invitation[]   @relation("InvitationInviter")
+  invitationsAccepted Invitation[]   @relation("InvitationAccepter")
+  auditLogs           AuditLog[]
+
+  @@unique([email])
+  @@map("users")
+}
+
+model Session {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(3)
+  token          String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  userId         String   @map("user_id") @db.Uuid
+  impersonatedBy String?  @map("impersonated_by")
+  // Cliente ativo, gravado so pelo servidor apos conferir a participacao (nunca pelo navegador).
+  activeClientId String?  @map("active_client_id") @db.Uuid
+
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeClient Client? @relation(fields: [activeClientId], references: [id], onDelete: SetNull)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("sessions")
+}
+
+// A senha (hash scrypt do Better Auth) fica em account.password; nunca em users.
+model Account {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id") @db.Uuid
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+// Usado pelo Better Auth para o token de redefinicao de senha (identifier guardado como hash
+// com verification.storeIdentifier = "hashed"; uso unico via consumeVerificationValue).
+model Verification {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+// Limite de tentativas do Better Auth com armazenamento em banco (rateLimit.storage = "database").
+// A chave mistura IP e rota; a linha some quando a janela expira. Sem dados de cliente: sem RLS.
+model RateLimit {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String
+  count       Int
+  lastRequest BigInt @map("last_request")
+
+  @@unique([key])
+  @@map("rate_limits")
+}
+
+// ---------- Dominio ----------
+
+model Client {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  legalName     String?      @map("legal_name")
+  slug          String
+  contactName   String?      @map("contact_name")
+  contactEmail  String?      @map("contact_email")
+  timezone      String       @default("America/Maceio")
+  status        ClientStatus @default(ACTIVE)
+  brandSettings Json?        @map("brand_settings")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  members     ClientMember[]
+  invitations Invitation[]
+  auditLogs   AuditLog[]
+  sessions    Session[]
+
+  @@unique([slug])
+  @@map("clients")
+}
+
+model ClientMember {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId    String       @map("client_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  role        MemberRole
+  permissions String[]     @default([])
+  status      MemberStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, userId])
+  @@index([userId, status])
+  @@map("client_members")
+}
+
+// Convite de uso unico. O token em si nunca e gravado: so o hash SHA-256.
+model Invitation {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId     String     @map("client_id") @db.Uuid
+  email        String
+  role         MemberRole
+  tokenHash    String     @map("token_hash")
+  expiresAt    DateTime   @map("expires_at") @db.Timestamptz(3)
+  usedAt       DateTime?  @map("used_at") @db.Timestamptz(3)
+  usedByUserId String?    @map("used_by_user_id") @db.Uuid
+  revokedAt    DateTime?  @map("revoked_at") @db.Timestamptz(3)
+  invitedById  String     @map("invited_by_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invitedBy User   @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Restrict)
+  usedBy    User?  @relation("InvitationAccepter", fields: [usedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tokenHash])
+  @@index([clientId, email])
+  @@index([clientId, expiresAt])
+  @@map("invitations")
+}
+
+// Append-only: o papel do app nao tem UPDATE nem DELETE nesta tabela (migration 0001).
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId   String?  @map("client_id") @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  requestId  String?  @map("request_id")
+  // Diff sanitizado: nunca senha, token ou hash.
+  diff       Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  actor  User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

@@ -1,0 +1,45 @@
+# Glossário
+
+Palavras que o agente e os guias usam, em linguagem simples. Em ordem alfabética.
+
+- **Agente**: a IA que lê, escreve e executa coisas no seu computador (Claude Code, Codex). Os **agentes especialistas** da base (`scaff-*`) são versões dela focadas num papel: produto, banco, segurança, testes.
+- **API**: a porta pela qual um programa conversa com outro. O app no celular fala com o servidor pela API.
+- **Backend (servidor)**: a parte que roda longe do usuário, guarda os dados e aplica as regras.
+- **Backup**: cópia dos dados guardada em outro lugar. Só vale se a **restauração** foi testada.
+- **Banco de dados**: onde o sistema guarda as informações de forma organizada (PostgreSQL é o padrão da base).
+- **Branch**: uma linha paralela do histórico do Git, para mexer numa entrega sem estragar a principal.
+- **Build**: o pacote pronto do app, gerado a partir do código, que vai para o servidor ou para a loja.
+- **CI**: verificações automáticas que rodam a cada mudança enviada ao GitHub.
+- **Commit**: um ponto salvo no histórico do Git, com uma mensagem do que mudou.
+- **Contexto**: tudo o que o agente está "lembrando" na conversa. Tem limite; conversas longas ficam caras e confusas.
+- **Credencial ou segredo**: senha, chave de API ou token. Nunca vai para o código, o chat público ou o GitHub.
+- **Critério de aceite**: frase que diz como provar que algo está pronto ("ao pagar com Pix, o pedido muda para pago em até 1 minuto").
+- **Deploy (publicar)**: colocar uma versão do sistema no ar.
+- **DNS**: a lista que diz para onde aponta o seu domínio.
+- **Domínio**: o endereço do site (`seunegocio.com.br`).
+- **Frontend (interface)**: a parte que o usuário vê e toca: telas, botões, formulários.
+- **Gateway de pagamento**: a empresa que processa cartão, Pix e boleto (Asaas, Mercado Pago, Stripe, Greenn…).
+- **Git**: programa que guarda o histórico de mudanças do projeto e permite voltar atrás.
+- **GitHub**: site que guarda o repositório Git na internet, com backup e colaboração.
+- **Handoff**: o arquivo `contexto/HANDOFF.md`, onde o agente anota o que fez, como conferiu e o próximo passo. É o que permite continuar em outra conversa.
+- **HTTPS**: o cadeado do navegador; a conexão vai cifrada.
+- **LGPD**: a lei brasileira de proteção de dados pessoais.
+- **Login social**: entrar com a conta do Google ou da Apple.
+- **MCP**: um jeito padrão de dar ferramentas novas ao agente (navegador, documentação, serviços).
+- **Migration**: script que muda a estrutura do banco de forma controlada e reversível.
+- **Multiempresa (multi-tenant)**: um sistema usado por várias empresas, cada uma vendo só os próprios dados.
+- **Plugin**: um pacote que acrescenta skills, agentes ou ferramentas ao Claude Code ou ao Codex.
+- **Produção**: o ambiente real, usado pelos clientes.
+- **Prompt**: o que você escreve para o agente.
+- **PRD**: documento de produto para alguém aprovar antes de construir.
+- **Repositório**: a pasta do projeto com seu histórico Git.
+- **Rollback (plano de volta)**: como voltar para a versão anterior se a nova der problema.
+- **Sandbox**: ambiente de teste do gateway ou da loja, com dinheiro de mentira.
+- **Skill**: instruções prontas que o agente segue numa etapa (`scaff-iniciar`, `scaff-publicar`…).
+- **Spec**: o documento que diz o que vai ser construído, para quem e como provar que funciona (`specs/0001/spec.md`).
+- **Stack**: o conjunto de tecnologias escolhido (linguagem, framework, banco).
+- **Staging**: cópia do sistema para ensaiar antes da produção, com dados de teste.
+- **Terminal (PowerShell)**: a janela onde se digitam comandos.
+- **Token**: (1) pedaço de texto que o agente lê ou escreve; o uso do plano é medido em tokens. (2) Uma credencial de acesso.
+- **VPS**: um servidor alugado na internet, onde o sistema roda.
+- **Webhook**: aviso que um serviço manda para o seu sistema quando algo acontece (o gateway avisa que o Pix foi pago).
