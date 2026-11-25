@@ -36,3 +36,6 @@ Thumbs.db
 # Material do mantenedor (fora do pacote do aluno)
 _bastidores/
 .storage-local/
+
+# capturas de evidencia regeneradas pelo e2e (nao versionar)
+specs/*/evidencias/
