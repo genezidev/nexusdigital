@@ -1,6 +1,6 @@
 # Segunda entrega: planos, ciclos, conteúdos, aprovação, arquivos privados e roteiros (fase 2)
 
-Estado: em andamento (aprovada pelo dono em 2026-11-24, com as recomendações das decisões pendentes: interface de storage com disco local em dev e S3-compatível em produção a decidir após o inventário da VPS; limites 20 MB/50 MB/2 GB; sem antivírus na fase 2; e-mail e notificações na fase 4; aprovação só pelo cliente; cota cheia no primeiro ciclo, ajustável) · Data: 2026-11-24
+Estado: implementada ate as telas (aprovada pelo dono em 2026-11-24, com as recomendações das decisões pendentes: interface de storage com disco local em dev e S3-compatível em produção a decidir após o inventário da VPS; limites 20 MB/50 MB/2 GB; sem antivírus na fase 2; e-mail e notificações na fase 4; aprovação só pelo cliente; cota cheia no primeiro ciclo, ajustável) · Data: 2026-11-24
 
 Fonte do produto completo: contexto/ESPECIFICACAO-MESTRE.md (seções 5, 5.2, 5.3, 8, 9, 10, 11 fase 2 e 12). Esta spec cobre só a fase 2 do roadmap: "Planos, ciclos, conteúdos, versões, aprovação, roteiros e arquivos". Critério de aceite do roadmap: fluxo completo persistido, aprovação por versão, upload privado e progresso correto. Parte da base da fase 1 (specs/0001/spec.md, revisada): login por convite, isolamento por `client_id` com RLS, auditoria imutável.
 
@@ -307,3 +307,29 @@ Escopo desta entrega: armazenamento privado (driver de disco), handlers HTTP de 
 | Armazenamento S3, proxy reverso real, video de 2 GB, antivirus, disco cheio real, retomada de envio por partes | NAO provado | `docs/armazenamento.md` |
 
 Mutacoes (codigo quebrado de proposito, suite rodada, codigo restaurado): ver `contexto/HANDOFF.md`, secao "Fase 2: backend de arquivos e handlers HTTP".
+
+### Evidencias das telas (2026-11-25, agente de telas)
+
+Escopo: telas admin e portal, upload com progresso, E2E de navegador, capturas e axe. **Sem migration nova, sem mudanca de contrato da API.** Decisao: D-0019; regra: R-18. Testes: `app/e2e/fase2-jornada.spec.ts` (10 testes, serial), `fase2-estados.spec.ts` (8), `fase2-upload.spec.ts` (2), `fase2-visual.spec.ts` (13: axe e captura); unitarios `src/lib/fase2-presentation.test.ts` e `forms-fase2.test.ts`. Capturas (360, 768 e 1440 px, claro e escuro, dados ficticios): `specs/0002/evidencias/`.
+
+| Criterio | Estado | Evidencia |
+|---|---|---|
+| P1 admin cria plano (erro inline), assina, abre ciclo; cliente ve plano, vigencia, consumidas e restantes | provado no navegador | jornada "P1" e "P1 no portal" |
+| P1 ajuste de cota do primeiro ciclo com justificativa, encerrar e reabrir ciclo | telas implementadas; so o ajuste na abertura e a validacao de justificativa por unitario/API; **nao ha E2E de encerrar/reabrir/ajustar** | `subscription-forms.tsx`, testes HTTP da fase anterior |
+| P2 criar peca, material, anexo, compartilhar, enviar; so transicoes permitidas; cancelar com justificativa; publicar com URL (http recusada) | provado no navegador (cancelar: modal aberto nas capturas e acesso do staff; fluxo completo de cancelar so por API anterior) | jornada "P2", "P3" e "P1 no portal" |
+| P2 calendario mensal e lista, filtros, reagendar fora do mes recusado | grade e lista provadas por axe e captura; reagendar fora do mes provado pela API; **reagendar pelo formulario nao tem E2E** | visual, jornada "P2" |
+| P2 lista com filtros, busca e paginacao no servidor | filtros e busca provados; paginacao so por link (poucos itens no E2E) | jornada "P2" |
+| P3 aprovar uma versao e pedir revisao de outra (comentario obrigatorio) | provado | jornada "P3" |
+| P3 versao desatualizada: aviso, botao some, 409 tratado, versao antiga sem botao | provado | jornada "P3 versao desatualizada" |
+| P3 editar material aprovado invalida a aprovacao e volta a fila | provado | jornada "P3 admin edita" |
+| P3 colaborador sem permissao nao ve o botao; servidor responde 403 | provado | jornada |
+| P3 cliente nao ve briefing nem rascunho | provado na tela (marca plantada ausente do HTML) | jornada "P3" |
+| P4 upload valido (imagem, PDF, video); executavel, HTML com nome de imagem e arquivo acima do limite recusados; download so como anexo | provado (validacao previa + recusa do servidor + cabecalho attachment/nosniff) | jornada "P5" e "upload", "isolamento" |
+| P4 progresso, cancelar, queda e 413/415/429/503 em pt-BR | provado com a rede simulada no navegador (o servidor real recusa nos testes HTTP) | `fase2-upload.spec.ts` |
+| P5 roteiro por cenas, PDF, enviar, gravar por arquivo, confirmar, pedir regravacao | provado; **gravacao por link nao tem E2E** (so API) | jornada "P5" |
+| Isolamento: A contra URL, id, API e link assinado do B; staff sem escrita; staff nao atribuido | provado | jornada "isolamento" e "staff" |
+| Estados: vazio, erro, acesso negado, nao encontrado, carregando, sem cliente ativo, troca de cliente | provado | `fase2-estados.spec.ts` |
+| axe (WCAG A e AA) sem violacoes, 360/768/1440, claro e escuro, telas novas | provado (inclui modais de erro) | `fase2-visual.spec.ts` |
+| Teclado: modal abre por Enter, Esc devolve foco; foco visivel e alvos de 44px | parcial: so um fluxo por teclado no E2E; 44px pelos componentes | `fase2-estados.spec.ts` |
+
+Nao provado: zoom de 200%, leitor de tela real, S3, proxy real, arquivo de 2 GB, navegador que nao seja Chromium. Nao implementado (sem backend): tela de permissoes finas de STAFF e colaborador, e-mail e notificacao, selo "aguardando o cliente ha N dias uteis" e "revisao acima do combinado". Problemas achados e corrigidos pelo E2E: `aria-label` que nao continha o texto visivel (axe `label-content-name-mismatch`), texto `sr-only` do calendario alargando a pagina a 768 px, e `setInputFiles` perdido antes da hidratacao (helper `chooseFile`).

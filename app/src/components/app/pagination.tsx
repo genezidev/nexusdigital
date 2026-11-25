@@ -3,8 +3,9 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { totalPages } from "@/lib/pagination";
 
-function href(basePath: string, page: number, q?: string): string {
+function href(basePath: string, page: number, q?: string, extra?: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(extra ?? {})) if (v) params.set(k, v);
   if (q) params.set("q", q);
   if (page > 1) params.set("page", String(page));
   const qs = params.toString();
@@ -12,7 +13,7 @@ function href(basePath: string, page: number, q?: string): string {
 }
 
 /** Paginacao no servidor: links comuns (funcionam sem JavaScript), com a busca preservada. */
-export function Pagination({ basePath, page, pageSize, total, q }: { basePath: string; page: number; pageSize: number; total: number; q?: string }) {
+export function Pagination({ basePath, page, pageSize, total, q, params }: { basePath: string; page: number; pageSize: number; total: number; q?: string; params?: Record<string, string | undefined> }) {
   const pages = totalPages(total, pageSize);
   if (total === 0) return null;
   const from = (page - 1) * pageSize + 1;
@@ -25,7 +26,7 @@ export function Pagination({ basePath, page, pageSize, total, q }: { basePath: s
       <div className="flex items-center gap-2">
         {page > 1 ? (
           <Button asChild variant="outline">
-            <Link href={href(basePath, page - 1, q)} rel="prev">
+            <Link href={href(basePath, page - 1, q, params)} rel="prev">
               <ChevronLeft aria-hidden="true" /> Anterior
             </Link>
           </Button>
@@ -35,7 +36,7 @@ export function Pagination({ basePath, page, pageSize, total, q }: { basePath: s
         </span>
         {page < pages ? (
           <Button asChild variant="outline">
-            <Link href={href(basePath, page + 1, q)} rel="next">
+            <Link href={href(basePath, page + 1, q, params)} rel="next">
               Próxima <ChevronRight aria-hidden="true" />
             </Link>
           </Button>

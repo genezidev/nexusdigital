@@ -1,7 +1,14 @@
 "use client";
 
 import {
+  BadgeCheck,
   Building2,
+  CalendarDays,
+  Clapperboard,
+  ClipboardCheck,
+  FileText,
+  Package,
+  Repeat,
   Home,
   Layers,
   LayoutDashboard,
@@ -31,7 +38,20 @@ import { ApiError, api } from "@/lib/api/client";
 import { hardNavigate } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
-const ICONS = { dashboard: LayoutDashboard, clients: Building2, audit: ScrollText, profile: UserRound, home: Home } satisfies Record<string, LucideIcon>;
+const ICONS = {
+  dashboard: LayoutDashboard,
+  clients: Building2,
+  audit: ScrollText,
+  profile: UserRound,
+  home: Home,
+  plans: Package,
+  subscriptions: Repeat,
+  calendar: CalendarDays,
+  contents: FileText,
+  scripts: Clapperboard,
+  approvals: ClipboardCheck,
+  plan: BadgeCheck,
+} satisfies Record<string, LucideIcon>;
 
 export interface NavItem {
   href: string;

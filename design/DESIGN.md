@@ -98,7 +98,7 @@ Inter com fallback system-ui. Títulos entre 24 e 32px, corpo entre 14 e 16px (1
 
 ## Layout
 
-Escala de espaçamento 4/8/12/16/24/32. Sidebar de 240px no desktop e drawer no celular; header com contexto (cliente, para admin) e período. Tamanhos testados: 360, 768 e 1440px. Navegação do admin: Clientes, Auditoria (fase 1) e demais módulos nas fases seguintes; do portal: Início e Perfil. Breadcrumbs, filtro de cliente (admin), busca, paginação e estados vazios previstos desde o shell.
+Escala de espaçamento 4/8/12/16/24/32. Sidebar de 240px no desktop e drawer no celular; header com contexto (cliente, para admin) e período. Tamanhos testados: 360, 768 e 1440px. Navegação do admin: Painel, Clientes, Planos, Assinaturas e ciclos, Calendário, Conteúdos, Roteiros, Auditoria (só ADMIN) e Perfil; do portal: Início, Meu plano, Calendário, Conteúdos, Aprovações, Roteiros e Perfil (a fase 2 só acrescentou rotas que existem). Breadcrumbs, filtro de cliente (admin), busca, paginação e estados vazios previstos desde o shell.
 
 ## Shapes
 
@@ -118,3 +118,15 @@ shadcn/ui sobre Tailwind (versões fixadas na fundação; licença MIT). Origem 
 - Faça: mostrar ao cliente só o que foi publicado e compartilhado, nunca notas internas.
 - Não faça: usar o verde da Cliente Modelo como cor global; mostrar zero onde o dado é ausente (mostrar N/D); prometer vendas ou resultados.
 - Evidência: capturas de tela em 360, 768 e 1440px (claro e escuro) em `specs/0001/evidencias/` (geradas por `app/e2e/visual.spec.ts`), mais checagem automática com axe-core (WCAG 2.0/2.1/2.2 A e AA, 0 violações) em `app/e2e/a11y.spec.ts`. Sem prova ainda: zoom de 200%, leitor de tela real, 1024px e o linter `designmd lint` (o `npx` do pacote de terceiros não foi autorizado nesta sessão).
+
+## Padrões da fase 2 (telas de planos, conteúdos, aprovação, roteiros e arquivos)
+
+- **Escolha do cliente na agência**: as telas de agência mostram um cliente por vez. O seletor é um formulário GET com `<select>` nativo (`ClientScopeBar`); o cliente vai na URL como alvo e o servidor confere o acesso (404 igual para inexistente e não atribuído). Trocar de cliente recarrega a página inteira do servidor, sem estado do anterior.
+- **Seletor nativo** (`NativeSelect`, 44px) nos formulários novos e nos filtros: teclado, leitor de tela e celular de graça; o `Select` do Radix fica para o que já existia.
+- **Modais**: `FormDialog` (formulário com erro inline por campo e erro do formulário) e `ReasonDialog` (justificativa escrita, mínimo de 10 caracteres, para cancelar, pedir regravação, reabrir ciclo e pedir revisão). Ações irreversíveis ou que mudam o que o cliente vê usam `ConfirmAction` (foco inicial em Cancelar).
+- **Progresso** (`ProgressCard`): fração em texto ("7 de 12 publicadas (58%)") mais barra `role=progressbar`; planejadas, produzidas, aprovadas e publicadas lado a lado; excedente e fora da cota em linha separada, nunca somados; sem cota mostra "Sem cota definida"; sem dado mostra N/D.
+- **Status e selos** sempre com texto (`ContentStatusBadge`, `ScriptStatusBadge`, `VisibilityBadge`, selo "Atrasado" calculado). O cliente lê o status em linguagem própria ("Aguardando sua aprovação", "Em ajuste pela agência").
+- **Calendário**: grade mensal (domingo a sábado) em telas largas e lista equivalente em telas estreitas ou por escolha; cada peça é link com formato e status em texto; reagendar é formulário de data (no modo lista), arrastar não existe.
+- **Arquivos** (`FileUploader`): validação prévia de tipo e tamanho (a decisão é do servidor), barra de progresso, "Cancelar envio", mensagens em pt-BR para queda, 413, 415, 429 e 503. Download só por botão que pede link assinado curto (`DownloadButton`); nunca há link permanente nem prévia por URL pública. Links externos (`ExternalLink`) abrem em nova aba com `rel="noopener noreferrer nofollow"` e mostram o domínio.
+- **Decisão de aprovação** (`DecisionPanel`): sempre ligada à versão exibida; versão antiga mostra aviso e nenhum botão; se o servidor responder versão desatualizada ou já decidida, os botões somem e aparece "Carregar a versão atual". O botão só existe para quem tem a permissão.
+- Evidência: capturas em `specs/0002/evidencias/` (geradas por `app/e2e/fase2-visual.spec.ts`) e axe sem violações no mesmo teste.

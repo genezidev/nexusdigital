@@ -315,3 +315,12 @@ Formato inspirado no MADR (https://github.com/adr/madr, MIT ou CC0).
 **Progresso no portal:** `GET /api/portal/plan` devolve o retrato da assinatura e SO numeros do ciclo (sem fora-da-cota por peca nem titulos); sem `cycleId`, vale o ciclo da competencia atual no fuso do cliente.
 
 **Como conferir:** `tests/http/fase2-*.test.ts`.
+
+## D-0019: telas da fase 2 (cliente-alvo na URL da agencia, decisao no servidor, sem capacidade simulada)
+
+- Data: 2026-11-25 · Estado: aceita pelo agente de telas (depende de confirmacao do dono)
+- Quem decidiu: agente de telas
+
+**Escolha:** (1) as telas de agencia (`/admin/plans`, `/admin/subscriptions`, `/admin/calendar`, `/admin/contents`, `/admin/scripts`) mostram um cliente por vez; o cliente vem em `?client=<id>` e e so o ALVO: `loadAdminScope` chama `resolveAdminClientContext` (ADMIN, ou STAFF atribuido; id invalido, inexistente ou nao atribuido = a mesma tela de nao encontrado) em CADA pagina, o layout nunca e a unica barreira. (2) O portal nunca le cliente da URL: `loadPortalScope` usa `resolveTenantContext` com a sessao; `?client=` no portal e ignorado (provado no E2E). (3) Paginas leem pelos mesmos servicos e pelos mesmos esquemas Zod de saida da API (`dto-fase2.ts`), entao o cliente nunca recebe campo interno na tela; nada de dado por pessoa em cache compartilhado (todas as paginas sao dinamicas por sessao). (4) Botao so existe para quem tem a permissao (`can` no servidor), mas isso e conveniencia: a API recusa de novo (403/404). (5) Mutacoes pelo cliente unico da API (`lib/api/client.ts`, resposta validada com Zod, erros em pt-BR); envio de arquivo em duas etapas com XMLHttpRequest so para ter progresso (`lib/api/upload.ts`); download so por link assinado curto emitido por POST. (6) Capacidades que o backend nao tem aparecem como ausentes, sem botao falso: tela de permissoes finas (`content:approve`, `-content:write`) so por banco; sem e-mail ou notificacao; sem driver S3; sem selo "aguardando o cliente ha N dias uteis" nem "revisao acima do combinado" (o servico calcula mas nao guarda); atraso e calculado na tela (data prevista passada sem publicar, analisar ou cancelar). (7) Seletor nativo (`NativeSelect`) nos formularios novos e filtros: teclado, leitor de tela e GET sem JavaScript.
+
+**Como conferir:** `app/e2e/fase2-*.spec.ts`; `app/src/server/page-data.ts`.

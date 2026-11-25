@@ -5,6 +5,11 @@ import { getMyClients, requireClientPageActor } from "@/server/page-session";
 
 const NAV: NavItem[] = [
   { href: "/portal", label: "Início", icon: "home", exact: true },
+  { href: "/portal/plan", label: "Meu plano", icon: "plan" },
+  { href: "/portal/calendar", label: "Calendário", icon: "calendar" },
+  { href: "/portal/contents", label: "Conteúdos", icon: "contents" },
+  { href: "/portal/approvals", label: "Aprovações", icon: "approvals" },
+  { href: "/portal/scripts", label: "Roteiros", icon: "scripts" },
   { href: "/portal/profile", label: "Perfil", icon: "profile" },
 ];
 

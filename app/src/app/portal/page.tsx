@@ -12,6 +12,10 @@ import { resolveTenantContext } from "@/server/authorization/context";
 import { getDb } from "@/server/db/client";
 import { getMyClients, requireClientPageActor } from "@/server/page-session";
 import { loadPortalHome } from "@/server/services/portal";
+import { pageContentsFor, pageScriptsFor } from "@/server/services/queries";
+import { can } from "@/server/authorization/permissions";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Início" };
 
@@ -21,14 +25,17 @@ export default async function PortalHome() {
     const actor = await requireClientPageActor();
     const clients = await getMyClients(actor.userId);
     const active = clients.find((c) => c.id === actor.activeClientId) ?? null;
-    if (!active) return { actor, clients, active: null, home: null, memberRole: null };
+    if (!active) return { actor, clients, active: null, home: null, memberRole: null, pending: null };
     const db = getDb();
     const ctx = await resolveTenantContext(db, { userId: actor.userId, activeClientId: actor.activeClientId });
     const home = await loadPortalHome(db, ctx);
-    return { actor, clients, active, home, memberRole: ctx.memberRole };
+    // "Acoes necessarias": so contagens (sem notificacao por e-mail nesta fase).
+    const awaiting = can(ctx, "content:read") ? (await pageContentsFor(db, ctx, { page: 1, pageSize: 1, sort: "plannedOn", dir: "asc", status: "AGUARDANDO_APROVACAO" })).total : 0;
+    const recording = can(ctx, "script:read") ? (await pageScriptsFor(db, ctx, { page: 1, pageSize: 1, sort: "createdAt", dir: "desc", status: "AGUARDANDO_GRAVACAO" })).total : 0;
+    return { actor, clients, active, home, memberRole: ctx.memberRole, pending: { approvals: awaiting, recordings: recording, canApprove: can(ctx, "content:approve") } };
   });
   if (!loaded.ok) return loaded.view;
-  const { actor, clients, active, home, memberRole } = loaded.data;
+  const { actor, clients, active, home, memberRole, pending } = loaded.data;
   const crumbs = [{ label: "Início" }];
 
   if (clients.length === 0) {
@@ -58,6 +65,34 @@ export default async function PortalHome() {
     <>
       <PageHeader crumbs={crumbs} title={`Olá, ${actor.name.split(" ")[0]}`} description={`Você está em ${home.client.name} como ${ROLE_LABEL[active.role].toLowerCase()}.`} />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+        {pending ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Ações necessárias</CardTitle>
+              <CardDescription>O que depende de você agora.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {pending.approvals + pending.recordings === 0 ? (
+                <p className="text-sm text-muted-foreground">Nada pendente com você no momento.</p>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {pending.approvals > 0 ? (
+                    <li className="flex flex-wrap items-center justify-between gap-2">
+                      <span>{pending.approvals} peça(s) aguardando a sua aprovação</span>
+                      <Button asChild variant="outline"><Link href="/portal/approvals">Ver aprovações</Link></Button>
+                    </li>
+                  ) : null}
+                  {pending.recordings > 0 ? (
+                    <li className="flex flex-wrap items-center justify-between gap-2">
+                      <span>{pending.recordings} roteiro(s) aguardando a sua gravação</span>
+                      <Button asChild variant="outline"><Link href="/portal/scripts">Ver roteiros</Link></Button>
+                    </li>
+                  ) : null}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardHeader>
             <CardTitle>Seu cliente</CardTitle>
@@ -115,7 +150,7 @@ export default async function PortalHome() {
 
         <div className="flex items-start gap-3 rounded-xl border bg-card p-4 text-sm text-muted-foreground" role="note">
           <Info className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-          <p>Planejamento, conteúdos, relatórios e financeiro chegam nas próximas fases. Por enquanto, esta é a sua área de acesso.</p>
+          <p>Relatórios e financeiro chegam nas próximas fases.</p>
         </div>
       </div>
     </>

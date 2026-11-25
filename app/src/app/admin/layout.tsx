@@ -22,6 +22,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const nav: NavItem[] = [
     { href: "/admin", label: "Painel", icon: "dashboard", exact: true },
     { href: "/admin/clients", label: "Clientes", icon: "clients" },
+    { href: "/admin/plans", label: "Planos", icon: "plans" },
+    { href: "/admin/subscriptions", label: "Assinaturas e ciclos", icon: "subscriptions" },
+    { href: "/admin/calendar", label: "Calendário", icon: "calendar" },
+    { href: "/admin/contents", label: "Conteúdos", icon: "contents" },
+    { href: "/admin/scripts", label: "Roteiros", icon: "scripts" },
     ...(actor.role === "ADMIN" ? [{ href: "/admin/audit", label: "Auditoria", icon: "audit" } satisfies NavItem] : []),
     { href: "/admin/profile", label: "Perfil", icon: "profile" },
   ];

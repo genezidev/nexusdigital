@@ -1,4 +1,6 @@
 import { ScrollText, Users } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import type { Metadata } from "next";
 import { AccountBadge, ClientStatusBadge, InvitationBadge } from "@/components/app/badges";
 import { InviteDialog } from "@/components/app/invite-dialog";
@@ -45,6 +47,17 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       />
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Trabalho do cliente</CardTitle>
+            <CardDescription>Plano, ciclos, peças, calendário e roteiros deste cliente.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="flex flex-wrap gap-2" aria-label="Módulos do cliente">
+              {[["Assinaturas e ciclos", "/admin/subscriptions"], ["Conteúdos", "/admin/contents"], ["Calendário", "/admin/calendar"], ["Roteiros", "/admin/scripts"]].map(([label, path]) => (<li key={path}><Button asChild variant="outline"><Link href={path + "?client=" + client.id}>{label}</Link></Button></li>))}
+            </ul>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>Dados do cliente</CardTitle>

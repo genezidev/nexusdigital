@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { attachBody, contentBody, cycleBody, materialBody, planBody, planVersionBody, planningPatchBody, scriptBody, scriptPatchBody, subscriptionBody } from "@/lib/schemas-fase2";
 
 // Cliente UNICO da API do navegador. Toda chamada passa por `call`, que:
 // - so fala com a propria origem (credentials same-origin, sem token em localStorage: a sessao e cookie HttpOnly);
@@ -39,6 +40,49 @@ const KNOWN: Record<string, string> = {
   UNAUTHORIZED: "Sua sessão expirou. Entre novamente.",
   NOT_FOUND: "Não encontramos o que você procura.",
   INTERNAL: "Algo deu errado do nosso lado. Tente novamente em instantes.",
+  // Fase 2: regras de negocio recusadas pelo servidor (a mensagem do servidor nao tem acentos; esta e a oficial).
+  ALREADY_DECIDED: "Esta versão já foi decidida por outra pessoa. Atualize a página para ver o resultado.",
+  STALE_VERSION: "Há uma versão mais recente deste conteúdo. Recarregue a página para ver a versão atual.",
+  NOT_AWAITING: "Este conteúdo não está mais aguardando aprovação.",
+  COMMENT_REQUIRED: "Pedir revisão exige um comentário explicando o que mudar.",
+  INVALID_TRANSITION: "Esta mudança de status não é permitida a partir do status atual.",
+  TERMINAL: "Este conteúdo está cancelado e não muda mais.",
+  CANCEL_REASON_REQUIRED: "Cancelar exige uma justificativa de pelo menos 10 caracteres.",
+  REASON_REQUIRED: "Informe uma justificativa de pelo menos 10 caracteres.",
+  PUBLICATION_DATA_REQUIRED: "Publicar exige a data de publicação e a URL HTTPS (ou um arquivo de evidência).",
+  PUBLICATION_URL_INVALID: "A URL de publicação precisa ser um link HTTPS válido (no Instagram, de instagram.com).",
+  MATERIAL_LOCKED: "Conteúdo publicado não tem o material editado. Registre a correção como comentário.",
+  NO_DRAFT: "Não há rascunho para enviar. Salve o material antes.",
+  NOT_MATERIAL: "Nada de material para salvar.",
+  OUTSIDE_CYCLE_MONTH: "A data precisa ficar dentro do mês do ciclo.",
+  PUBLISHED_IN_PAST: "Peça já publicada não é reagendada para o passado.",
+  CYCLE_CLOSED: "Este ciclo está encerrado e não aceita a alteração.",
+  CYCLE_EXISTS: "Já existe um ciclo para esta assinatura neste mês.",
+  CYCLE_NOT_CLOSED: "Só ciclo encerrado pode ser reaberto.",
+  CYCLE_OUTSIDE_SUBSCRIPTION: "O mês do ciclo está fora da vigência da assinatura.",
+  SUBSCRIPTION_ACTIVE_EXISTS: "Este cliente já tem uma assinatura ativa. Encerre ou pause a atual antes.",
+  SUBSCRIPTION_NOT_ACTIVE: "Só uma assinatura ativa pode abrir ciclo.",
+  PLAN_EXISTS: "Já existe um plano com este código.",
+  PLAN_VERSION_CONFLICT: "Outra versão do plano foi criada ao mesmo tempo. Atualize a página.",
+  INVALID_ASSIGNEE: "O responsável precisa ser alguém da equipe atribuída a este cliente.",
+  INVALID_LINK: "Link recusado: use um endereço https:// de um serviço autorizado, sem usuário, senha nem porta.",
+  SCRIPT_LOCKED: "O roteiro só pode ser editado enquanto é rascunho.",
+  RECORDING_SOURCE: "Informe um arquivo OU um link, não os dois.",
+  NOT_AWAITING_RECORDING: "Este roteiro não está aguardando gravação.",
+  RECORDING_NOT_PENDING: "Esta gravação não está aguardando conferência.",
+  RECORDING_NOT_REVIEWABLE: "Esta gravação não pode receber este pedido.",
+  RECORDING_NOT_RECEIVED: "Confirme o recebimento de uma gravação antes.",
+  LINKED_CONTENT_STATE: "O conteúdo ligado a este roteiro ainda não está no status necessário.",
+  ASSET_NOT_PENDING: "Este envio já foi encerrado. Escolha o arquivo e envie de novo.",
+  INCOMPLETE_UPLOAD: "O envio terminou antes de o arquivo chegar inteiro. Envie de novo.",
+  UPLOAD_IN_PROGRESS: "Este arquivo já está sendo enviado.",
+  PAYLOAD_TOO_LARGE: "O arquivo é maior que o limite permitido para este tipo.",
+  UNSUPPORTED_MEDIA_TYPE: "Tipo de arquivo não permitido. Use imagem JPEG, PNG ou WebP, PDF ou vídeo MP4, MOV ou WebM.",
+  TYPE_NOT_ALLOWED: "Tipo de arquivo não permitido. Use imagem JPEG, PNG ou WebP, PDF ou vídeo MP4, MOV ou WebM.",
+  BLOCKED_EXTENSION: "Este tipo de arquivo não é permitido por segurança.",
+  STORAGE_UNAVAILABLE: "O armazenamento está indisponível no momento. Nada foi salvo; tente novamente em instantes.",
+  STORAGE_QUOTA_EXCEEDED: "A cota de armazenamento deste cliente acabou. Fale com a agência.",
+  LINK_EXPIRED: "O link venceu. Peça um novo.",
 };
 
 const BY_STATUS: Record<number, string> = {
@@ -49,6 +93,8 @@ const BY_STATUS: Record<number, string> = {
   409: "Esta ação conflita com o estado atual. Atualize a página e tente de novo.",
   410: KNOWN.INVALID_INVITATION,
   422: "Corrija os campos indicados.",
+  413: KNOWN.PAYLOAD_TOO_LARGE,
+  415: KNOWN.UNSUPPORTED_MEDIA_TYPE,
   429: KNOWN.RATE_LIMITED,
   503: "Este recurso está indisponível neste ambiente.",
 };
@@ -95,7 +141,105 @@ const nothing = z.undefined();
 const okBody = z.object({ ok: z.literal(true) });
 const user = z.object({ user: z.object({ id: z.string() }) });
 
+// ---------- Fase 2 ----------
+// Mesmo molde: so a propria origem, resposta validada com Zod, erro traduzido. O cliente (clientId) das rotas
+// /api/admin/clients/[id] e apenas o ALVO da acao: o servidor reconfere a permissao em cada chamada.
+export type Scope = { kind: "admin"; clientId: string } | { kind: "portal" };
+const base = (scope: Scope) => (scope.kind === "admin" ? `/api/admin/clients/${encodeURIComponent(scope.clientId)}` : "/api/portal");
+const enc = encodeURIComponent;
+const idBody = z.object({ id: z.string() });
+const statusBody = z.object({ ok: z.literal(true), status: z.string().optional() });
+const uploadTarget = z.object({
+  assetId: z.string(),
+  path: z.string().startsWith("/api/files/upload/"),
+  method: z.literal("PUT"),
+  expiresAt: z.string(),
+  maxBytes: z.number(),
+});
+const downloadLink = z.object({ path: z.string().startsWith("/api/files/download/"), expiresAt: z.string() });
+const versionResult = z.object({ versionId: z.string() });
+
+export type PlanInput = z.input<typeof planBody>;
+export type PlanVersionInput = z.input<typeof planVersionBody>;
+export type SubscriptionInput = z.input<typeof subscriptionBody>;
+export type CycleInput = z.input<typeof cycleBody>;
+export type ContentInput = z.input<typeof contentBody>;
+export type PlanningPatch = z.input<typeof planningPatchBody>;
+export type MaterialInput = z.input<typeof materialBody>;
+export type ScriptInput = z.input<typeof scriptBody>;
+export type ScriptPatch = z.input<typeof scriptPatchBody>;
+export type AttachInput = z.input<typeof attachBody>;
+
+const apiFase2 = {
+  // plano (catalogo da agencia)
+  createPlan: (input: PlanInput) => call("POST", "/api/admin/plans", idBody, input),
+  createPlanVersion: (planId: string, input: PlanVersionInput) => call("POST", `/api/admin/plans/${enc(planId)}/versions`, idBody, input),
+  deactivatePlan: (planId: string) => call("POST", `/api/admin/plans/${enc(planId)}/deactivate`, okBody, {}),
+  // assinatura e ciclo
+  createSubscription: (clientId: string, input: SubscriptionInput) => call("POST", `/api/admin/clients/${enc(clientId)}/subscriptions`, idBody, input),
+  patchSubscription: (clientId: string, id: string, input: { status?: "ATIVA" | "PAUSADA" | "ENCERRADA"; endsOn?: string | null; billingDay?: number }) =>
+    call("PATCH", `/api/admin/clients/${enc(clientId)}/subscriptions/${enc(id)}`, okBody, input),
+  openCycle: (clientId: string, input: CycleInput) => call("POST", `/api/admin/clients/${enc(clientId)}/cycles`, idBody, input),
+  setCycleQuota: (clientId: string, cycleId: string, input: { quota: number; reason: string }) =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/cycles/${enc(cycleId)}/quota`, okBody, input),
+  closeCycle: (clientId: string, cycleId: string) => call("POST", `/api/admin/clients/${enc(clientId)}/cycles/${enc(cycleId)}/close`, okBody, {}),
+  reopenCycle: (clientId: string, cycleId: string, reason: string) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/cycles/${enc(cycleId)}/reopen`, okBody, { reason }),
+  // conteudo
+  createContent: (clientId: string, input: ContentInput) => call("POST", `/api/admin/clients/${enc(clientId)}/contents`, idBody, input),
+  patchPlanning: (clientId: string, contentId: string, input: PlanningPatch) =>
+    call("PATCH", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}`, okBody, input),
+  saveMaterial: (clientId: string, contentId: string, input: MaterialInput) =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/material`, versionResult, input),
+  sendVersion: (clientId: string, contentId: string, expectedVersionId?: string) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/send`, versionResult, expectedVersionId ? { expectedVersionId } : {}),
+  setContentStatus: (clientId: string, contentId: string, input: { to: string; cancelReason?: string; publishedAt?: string; publicationUrl?: string }) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/status`, statusBody, input),
+  reschedule: (clientId: string, contentId: string, plannedOn: string) =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/schedule`, okBody, { plannedOn }),
+  setClassification: (clientId: string, contentId: string, input: { countsTowardQuota?: boolean; isBonus?: boolean }) =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/classification`, okBody, input),
+  setVisibility: (clientId: string, contentId: string, visibility: "INTERNO" | "COMPARTILHADO") =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/visibility`, okBody, { visibility }),
+  moveToCycle: (clientId: string, contentId: string, input: { cycleId: string; reason: string }) =>
+    call("PUT", `/api/admin/clients/${enc(clientId)}/contents/${enc(contentId)}/cycle`, okBody, input),
+  addContentComment: (scope: Scope, contentId: string, input: { body: string; visibility?: "INTERNO" | "COMPARTILHADO"; versionId?: string }) =>
+    call("POST", `${base(scope)}/contents/${enc(contentId)}/comments`, idBody, input),
+  decide: (contentId: string, versionId: string, input: { decision: "APROVADO" | "REVISAO_SOLICITADA"; comment?: string }) =>
+    call(
+      "POST",
+      `/api/portal/contents/${enc(contentId)}/versions/${enc(versionId)}/decision`,
+      z.object({ approvalId: z.string(), replayed: z.boolean(), decision: z.string() }),
+      input,
+    ),
+  // roteiro e gravacao
+  createScript: (clientId: string, input: ScriptInput) => call("POST", `/api/admin/clients/${enc(clientId)}/scripts`, idBody, input),
+  patchScript: (clientId: string, scriptId: string, input: ScriptPatch) =>
+    call("PATCH", `/api/admin/clients/${enc(clientId)}/scripts/${enc(scriptId)}`, okBody, input),
+  setScriptStatus: (clientId: string, scriptId: string, input: { to: string; rerecording?: boolean; justification?: string }) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/scripts/${enc(scriptId)}/status`, statusBody, input),
+  addScriptComment: (scope: Scope, scriptId: string, input: { body: string; visibility?: "INTERNO" | "COMPARTILHADO" }) =>
+    call("POST", `${base(scope)}/scripts/${enc(scriptId)}/comments`, idBody, input),
+  submitRecording: (scope: Scope, scriptId: string, input: { assetId?: string; url?: string; imageRightsConfirmed?: boolean }) =>
+    call("POST", `${base(scope)}/scripts/${enc(scriptId)}/recordings`, z.object({ id: z.string(), replayed: z.boolean() }), input),
+  confirmRecording: (clientId: string, recordingId: string) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/recordings/${enc(recordingId)}/confirm`, okBody, {}),
+  requestRerecording: (clientId: string, recordingId: string, justification: string) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/recordings/${enc(recordingId)}/rerecording`, okBody, { justification }),
+  // arquivos: pedido de alvo, vinculo, download e exclusao (os bytes vao por `uploadFile`, em upload.ts)
+  initUpload: (scope: Scope, input: { originalName: string; mimeType: string; bytes: number; visibility?: "INTERNO" | "COMPARTILHADO" }) =>
+    call("POST", `${base(scope)}/assets`, uploadTarget, input),
+  attachAsset: (clientId: string, assetId: string, input: AttachInput) =>
+    call("POST", `/api/admin/clients/${enc(clientId)}/assets/${enc(assetId)}/links`, z.object({ id: z.string() }), input),
+  detachLink: (clientId: string, linkId: string) => call("DELETE", `/api/admin/clients/${enc(clientId)}/asset-links/${enc(linkId)}`, okBody),
+  setAssetVisibility: (clientId: string, assetId: string, visibility: "INTERNO" | "COMPARTILHADO") =>
+    call("PATCH", `/api/admin/clients/${enc(clientId)}/assets/${enc(assetId)}`, okBody, { visibility }),
+  deleteAsset: (scope: Scope, assetId: string) => call("DELETE", `${base(scope)}/assets/${enc(assetId)}`, okBody),
+  downloadLink: (scope: Scope, assetId: string) => call("POST", `${base(scope)}/assets/${enc(assetId)}/download`, downloadLink, {}),
+};
+
 export const api = {
+  ...apiFase2,
   login: (input: { email: string; password: string }) => call("POST", "/api/auth/sign-in/email", user, input),
   logout: () => call("POST", "/api/auth/sign-out", z.object({ success: z.boolean() }), {}),
   requestPasswordReset: (input: { email: string }) =>
