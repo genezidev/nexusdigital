@@ -113,7 +113,8 @@ export async function acceptInvitation(db: Db, input: AcceptInput, now: Date = n
       await tx.account.create({
         data: { userId: user.id, providerId: "credential", accountId: user.id, password: passwordHash },
       });
-      await tx.clientMember.create({ data: { clientId: inv.clientId, userId: user.id, role: inv.role } });
+      // D-0026: as concessoes do convite (so content:approve, so colaborador; o banco confere no convite) passam ao membro.
+      await tx.clientMember.create({ data: { clientId: inv.clientId, userId: user.id, role: inv.role, permissions: inv.role === "CLIENT_COLLABORATOR" ? (inv.permissions ?? []) : [] } });
       await tx.invitation.update({ where: { id: inv.id }, data: { usedByUserId: user.id } });
       await tx.auditLog.create({
         data: {

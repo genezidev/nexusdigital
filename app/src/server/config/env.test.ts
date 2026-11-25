@@ -96,4 +96,19 @@ describe("configuracao do servidor (M-1)", () => {
     expect(() => getServerEnv(env({ ...prod, ALLOW_INSECURE_LOCAL_APP_URL: "false", APP_URL: "http://127.0.0.1:3100" }))).toThrow(/APP_URL/);
     expect(() => getServerEnv(env({ ...prod, ALLOW_INSECURE_LOCAL_APP_URL: "sim", APP_URL: "https://app.exemplo.test" }))).toThrow(/ALLOW_INSECURE_LOCAL_APP_URL/);
   });
+
+  it("D-0025: upload nasce DESLIGADO; so o valor exato true liga; lista extra de dominios e validada", () => {
+    expect(getServerEnv(base).UPLOADS_ENABLED).toBe(false);
+    expect(getServerEnv(env({ UPLOADS_ENABLED: "true" })).UPLOADS_ENABLED).toBe(true);
+    expect(getServerEnv(env({ UPLOADS_ENABLED: "false" })).UPLOADS_ENABLED).toBe(false);
+    for (const ruim of ["TRUE", "1", "sim", "yes"]) expect(() => getServerEnv(env({ UPLOADS_ENABLED: ruim })), ruim).toThrow(/UPLOADS_ENABLED/);
+    expect(getServerEnv(base).MEDIA_LINK_EXTRA_HOSTS).toEqual([]);
+    expect(getServerEnv(env({ MEDIA_LINK_EXTRA_HOSTS: "exemplo.com.br, Arquivos.Outro.com " })).MEDIA_LINK_EXTRA_HOSTS).toEqual(["exemplo.com.br", "arquivos.outro.com"]);
+    for (const ruim of ["https://exemplo.com", "exemplo.com/x", "localhost", "127.0.0.1", "*.exemplo.com", "xn--abc.com", "exemplo.com:443", "a.local"]) {
+      expect(() => getServerEnv(env({ MEDIA_LINK_EXTRA_HOSTS: ruim })), ruim).toThrow(/MEDIA_LINK_EXTRA_HOSTS/);
+    }
+    const e = getServerEnv(base);
+    expect([e.MEDIA_LINK_RATE_MAX, e.TEAM_RATE_MAX]).toEqual([60, 20]);
+    expect(() => getServerEnv(env({ MEDIA_LINK_RATE_MAX: "0" }))).toThrow(/MEDIA_LINK_RATE_MAX/);
+  });
 });

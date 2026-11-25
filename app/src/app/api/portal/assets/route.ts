@@ -8,6 +8,7 @@ export const GET = route<Record<string, never>>(async (req, { requestId }) => {
 });
 
 export const POST = route<Record<string, never>>(async (req, { requestId }) => {
+  h.assertUploadsEnabled();
   const a = await portalCtx(req);
   return h.postAssetInit(a, req, requestId);
 });

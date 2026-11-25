@@ -45,8 +45,13 @@ export default async function setup() {
         RECORDING_RATE_MAX: "2",
         CONTENT_CREATE_RATE_MAX: "3",
         UPLOAD_PUT_RATE_MAX: "2",
+        // D-0025 e D-0026: links de midia e equipe, 3 por janela de 10 min e por pessoa.
+        MEDIA_LINK_RATE_MAX: "3",
+        TEAM_RATE_MAX: "3",
       },
     },
+    // D-0025: UPLOADS_ENABLED=false (o padrao real). Nenhuma rota de pedido, envio ou download de arquivo existe.
+    { port: HTTP_PORT + 5, env: { NEXO_TEST_UPLOADS: "false" } },
   ];
   const children: ChildProcess[] = [];
   let exited = false;

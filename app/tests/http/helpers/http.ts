@@ -10,6 +10,8 @@ export const BASE_CHAIN = "http://127.0.0.1:3102";
 export const BASE_LOW = "http://127.0.0.1:3103";
 /** Variante com limites BAIXOS por pessoa nas mutacoes (decisao 2, comentario 3, gravacao 2, conteudo 3, envio dos bytes 2). */
 export const BASE_MUT = "http://127.0.0.1:3104";
+/** Variante com UPLOADS_ENABLED=false (o padrao do app real): sem rotas de pedido, envio e download de arquivo. */
+export const BASE_NO_UPLOADS = "http://127.0.0.1:3105";
 export { TEST_PASSWORD };
 
 /** IP unico por chamada: o app de teste confia em x-real-ip (TRUST_PROXY=true, como atras do proxy) e isola o limite por IP. */

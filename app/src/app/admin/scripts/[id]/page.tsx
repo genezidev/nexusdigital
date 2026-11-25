@@ -5,6 +5,7 @@ import { RecordingHistory, ScriptInstructions, type RecordingData } from "@/comp
 import { ScriptStatusBadge } from "@/components/app/status-badges";
 import { AttachmentList, ScriptPdfUploader } from "@/components/fase2/attachments";
 import { CommentsPanel } from "@/components/fase2/comments-panel";
+import { MediaLinkForm, MediaLinkList } from "@/components/fase2/media-links";
 import { RecordingReviewActions, ScriptFormDialog, ScriptStatusPanel, type ScriptDefaults } from "@/components/fase2/script-forms";
 import { RecordingForm } from "@/components/fase2/recording-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { getDb } from "@/server/db/client";
 import { DEFAULT_RECORDING_DOMAINS } from "@/server/domain/external-link";
 import { allowedScriptTransitions, isScriptEditable } from "@/server/domain/script-state";
 import { NotFoundError } from "@/server/errors";
-import { commentOut, linkedAssetAgencyOut, recordingOut, scriptAgencyOut } from "@/server/http/dto-fase2";
+import { commentOut, linkedAssetAgencyOut, mediaLinkAgencyOut, recordingOut, scriptAgencyOut } from "@/server/http/dto-fase2";
 import { getServerEnv } from "@/server/config/env";
 import { loadAdminScope, loadAssignees, loadUploadLimits, type SearchParams } from "@/server/page-data";
 import { isUuid } from "@/server/services/access";
@@ -36,6 +37,8 @@ export default async function AdminScriptDetail({ params, searchParams }: { para
       recordings: v.recordings.map((r) => recordingOut.parse(r)),
       comments: v.comments.map((c) => commentOut.parse({ ...c, authorName: c.author.name })),
       assets: v.assets.map((a) => linkedAssetAgencyOut.parse(a)),
+      mediaLinks: v.mediaLinks.map((m) => mediaLinkAgencyOut.parse(m)),
+      uploadsEnabled: getServerEnv().UPLOADS_ENABLED,
       assignees: await loadAssignees(ctx),
       contents: contents.items.map((c) => ({ id: c.id, title: c.title })),
       limits: loadUploadLimits(),
@@ -58,7 +61,11 @@ export default async function AdminScriptDetail({ params, searchParams }: { para
   const pdfs = d.assets.filter((a) => a.link.scriptId === script.id).map((a) => ({ linkId: a.link.id, role: a.link.role, position: a.link.position, asset: { id: a.asset.id, originalName: a.asset.originalName, category: a.asset.category, bytes: a.asset.bytes, status: a.asset.status } }));
   const recordings: RecordingData[] = d.recordings.map((r) => {
     const link = d.assets.find((a) => a.link.recordingId === r.id);
-    return { ...r, asset: link ? { id: link.asset.id, originalName: link.asset.originalName, bytes: link.asset.bytes } : undefined };
+    return {
+      ...r,
+      asset: link ? { id: link.asset.id, originalName: link.asset.originalName, bytes: link.asset.bytes } : undefined,
+      mediaLinks: d.mediaLinks.filter((m) => m.recordingId === r.id).map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind, removable: d.flags.review })),
+    };
   });
   const defaults: ScriptDefaults = {
     title: script.title,
@@ -112,13 +119,29 @@ export default async function AdminScriptDetail({ params, searchParams }: { para
 
         <Card>
           <CardHeader>
-            <CardTitle>PDF do roteiro</CardTitle>
+            <CardTitle>Links de mídia do roteiro</CardTitle>
+            <CardDescription>Referências, o roteiro em PDF e outros materiais guardados em serviços externos. O sistema só guarda o endereço.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <AttachmentList scope={scope} items={pdfs} removableClientId={editable && d.flags.write ? sel.id : undefined} />
-            {editable && d.flags.write ? <ScriptPdfUploader clientId={sel.id} scriptId={script.id} limits={d.limits} /> : null}
+            <MediaLinkList
+              scope={scope}
+              items={d.mediaLinks.filter((m) => m.scriptId === script.id).map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind, removable: d.flags.write }))}
+            />
+            {d.flags.write ? <MediaLinkForm scope={scope} target={{ scriptId: script.id }} audience="admin" /> : null}
           </CardContent>
         </Card>
+
+        {d.uploadsEnabled ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>PDF do roteiro</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <AttachmentList scope={scope} items={pdfs} removableClientId={editable && d.flags.write ? sel.id : undefined} />
+              {editable && d.flags.write ? <ScriptPdfUploader clientId={sel.id} scriptId={script.id} limits={d.limits} /> : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -136,7 +159,7 @@ export default async function AdminScriptDetail({ params, searchParams }: { para
               <details className="rounded-lg border p-3">
                 <summary className="cursor-pointer text-sm font-medium">Registrar gravação em nome da equipe</summary>
                 <div className="mt-3">
-                  <RecordingForm scope={scope} scriptId={script.id} limits={d.limits} domains={d.domains} />
+                  <RecordingForm scope={scope} scriptId={script.id} limits={d.limits} domains={d.domains} uploadsEnabled={d.uploadsEnabled} />
                 </div>
               </details>
             ) : null}

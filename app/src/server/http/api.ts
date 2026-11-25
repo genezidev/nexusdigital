@@ -62,7 +62,7 @@ export async function limitByUser(name: string, userId: string, rule: { windowSe
  * (B-5). Um limite por PESSOA e por tipo, janela de 10 min, valores em variaveis de ambiente. O balde de cada tipo e
  * proprio (`app:mut-<tipo>:user:<id>`), entao nenhum afrouxa o limite de outro nem o do login.
  */
-export type MutationLimit = "decision" | "comment" | "recording" | "content-create" | "upload-put";
+export type MutationLimit = "decision" | "comment" | "recording" | "content-create" | "upload-put" | "media-link" | "team";
 
 export async function limitMutation(kind: MutationLimit, userId: string): Promise<void> {
   const env = getServerEnv();
@@ -72,6 +72,8 @@ export async function limitMutation(kind: MutationLimit, userId: string): Promis
     recording: env.RECORDING_RATE_MAX,
     "content-create": env.CONTENT_CREATE_RATE_MAX,
     "upload-put": env.UPLOAD_PUT_RATE_MAX,
+    "media-link": env.MEDIA_LINK_RATE_MAX,
+    team: env.TEAM_RATE_MAX,
   }[kind];
   await limitByUser(`mut-${kind}`, userId, { windowSeconds: 600, max });
 }

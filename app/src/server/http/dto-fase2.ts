@@ -229,6 +229,22 @@ export const linkedAssetAgencyOut = z.object({
   asset: assetAgencyOut,
 });
 
+// ---------- link de midia (D-0025) ----------
+
+const mediaBase = {
+  id: z.string(),
+  versionId: z.string().nullable(),
+  scriptId: z.string().nullable(),
+  recordingId: z.string().nullable(),
+  label: z.string(),
+  url: z.string(),
+  host: z.string(),
+  kind: z.string(),
+  createdAt: iso,
+};
+export const mediaLinkPortalOut = z.object(mediaBase);
+export const mediaLinkAgencyOut = z.object({ ...mediaBase, createdById: z.string() });
+
 // ---------- roteiro e gravacao ----------
 
 const sceneOut = z.object({ id: z.string(), position: z.number(), dialogue: z.string().nullable(), action: z.string().nullable(), durationSeconds: z.number().nullable() });

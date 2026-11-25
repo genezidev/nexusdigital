@@ -21,6 +21,14 @@ import { pageAssetsFor } from "@/server/services/queries";
 // Arquivos privados (R-5). Duas portas para o pedido (admin e portal) e UMA para os bytes (/api/files/...), que
 // reconfere sessao, vinculo do token e permissao a cada requisicao. Nada daqui serve arquivo sem autorizacao.
 
+/**
+ * D-0025: com UPLOADS_ENABLED=false (o padrao) nao existe pedido, envio nem download de arquivo: 404 com a MESMA forma de
+ * erro das outras rotas, antes de qualquer outra conferencia (nem login) e sem dizer que a funcao existe.
+ */
+export function assertUploadsEnabled(): void {
+  if (!getServerEnv().UPLOADS_ENABLED) throw new NotFoundError();
+}
+
 const assetOut = (a: Authorized, row: unknown) => (isAgency(a.ctx) ? assetAgencyOut : assetPortalOut).parse(row);
 const TEN_MINUTES = 600;
 

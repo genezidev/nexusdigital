@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { ProgressCard } from "@/components/app/progress-card";
 import { ContentStatusBadge, OverdueBadge, VisibilityBadge } from "@/components/app/status-badges";
 import { AttachmentList, VersionAttachUploader } from "@/components/fase2/attachments";
+import { MediaLinkForm, MediaLinkList } from "@/components/fase2/media-links";
 import { CommentsPanel } from "@/components/fase2/comments-panel";
 import { ClassificationPanel, ContentStatusPanel, MoveCycleDialog, RescheduleDialog, ShareToggle } from "@/components/fase2/content-actions";
 import { MaterialEditor, PlanningForm } from "@/components/fase2/content-forms";
@@ -17,8 +18,9 @@ import { CHANNEL_LABEL, DECISION_LABEL, FORMAT_LABEL, competenceLabel, formatDay
 import { daysInMonth } from "@/lib/calendar-grid";
 import { can } from "@/server/authorization/permissions";
 import { getDb } from "@/server/db/client";
+import { getServerEnv } from "@/server/config/env";
 import { allowedContentTransitions } from "@/server/domain/content-state";
-import { approvalOut, commentOut, contentAgencyOut, linkedAssetAgencyOut, versionAgencyOut } from "@/server/http/dto-fase2";
+import { approvalOut, commentOut, contentAgencyOut, linkedAssetAgencyOut, mediaLinkAgencyOut, versionAgencyOut } from "@/server/http/dto-fase2";
 import { loadAdminScope, loadAssignees, loadOpenCycles, loadUploadLimits, type SearchParams } from "@/server/page-data";
 import { NotFoundError } from "@/server/errors";
 import { getCycleView, getContentView } from "@/server/services/queries";
@@ -47,6 +49,8 @@ export default async function AdminContentDetail({ params, searchParams }: { par
       approvals: v.approvals.map((x) => approvalOut.parse({ ...x, authorName: x.author.name })),
       comments: v.comments.map((c) => commentOut.parse({ ...c, authorName: c.author.name })),
       assets: v.assets.map((x) => linkedAssetAgencyOut.parse(x)),
+      mediaLinks: v.mediaLinks.map((x) => mediaLinkAgencyOut.parse(x)),
+      uploadsEnabled: getServerEnv().UPLOADS_ENABLED,
       cycle: { year: cv.cycle.year, month: cv.cycle.month, status: cv.cycle.status },
       progress: cv.progress,
       assignees,
@@ -202,6 +206,27 @@ export default async function AdminContentDetail({ params, searchParams }: { par
 
         <Card>
           <CardHeader>
+            <CardTitle>Links de mídia</CardTitle>
+            <CardDescription>Imagens, vídeos e documentos guardados no Google Drive, YouTube e similares. O sistema só guarda o endereço: o link abre em outra aba.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <MediaLinkList
+              scope={scope}
+              items={d.mediaLinks
+                .filter((m) => m.versionId)
+                .map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind, note: `Versão ${versionNumber.get(m.versionId!) ?? "?"}`, removable: d.flags.write && m.versionId === draft?.id }))}
+            />
+            {draft && d.flags.write ? (
+              <MediaLinkForm scope={scope} target={{ versionId: draft.id }} audience="admin" buttonLabel="Adicionar link à versão" />
+            ) : d.flags.write && !LOCKED.has(content.status) ? (
+              <p className="text-sm text-muted-foreground">Salve o material para criar o rascunho da versão e então adicione os links. Versão já enviada é imutável: para trocar links, crie uma nova versão.</p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {d.uploadsEnabled ? (
+        <Card>
+          <CardHeader>
             <CardTitle>Arquivos</CardTitle>
             <CardDescription>Prévias e arquivos finais ligados às versões. Download por link assinado de poucos segundos.</CardDescription>
           </CardHeader>
@@ -216,6 +241,7 @@ export default async function AdminContentDetail({ params, searchParams }: { par
             ) : null}
           </CardContent>
         </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

@@ -82,6 +82,7 @@ export const ASSET_ROLE_LABEL: Record<string, string> = {
   GRAVACAO: "Gravação",
   EVIDENCIA: "Evidência de publicação",
 };
+export const MEDIA_KIND_LABEL: Record<string, string> = { IMAGEM: "Imagem", VIDEO: "Vídeo", PDF: "PDF", DOCUMENTO: "Documento", OUTRO: "Outro" };
 export const ASSET_CATEGORY_LABEL: Record<string, string> = { IMAGEM: "Imagem", VIDEO: "Vídeo", DOCUMENTO: "Documento" };
 
 const MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];

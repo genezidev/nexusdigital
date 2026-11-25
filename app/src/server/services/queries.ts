@@ -5,6 +5,7 @@ import { withTenant } from "@/server/db/scope";
 import { NotFoundError } from "@/server/errors";
 import { listLinkedAssets, pageAssets, type AssetPageQuery } from "@/server/repositories/assets";
 import { getContent, listApprovals, listComments, listVersions, pageContents, type ContentPageQuery } from "@/server/repositories/contents";
+import { listMediaLinks } from "@/server/repositories/media-links";
 import { getClientById } from "@/server/repositories/clients";
 import { getCycle, pageCycles } from "@/server/repositories/cycles";
 import { getRecording, getScript, listRecordings, pageScripts, type ScriptPageQuery } from "@/server/repositories/scripts";
@@ -28,7 +29,9 @@ export async function getContentView(db: Db, ctx: TenantContext, contentId: stri
     const [versions, approvals, comments] = await Promise.all([listVersions(s, contentId), listApprovals(s, contentId), listComments(s, { contentId })]);
     const assets = versions.length ? await listLinkedAssets(s, { versionId: { in: versions.map((v) => v.id) } }) : [];
     const evidence = await listLinkedAssets(s, { contentId });
-    return { content, versions, approvals, comments, assets: [...assets, ...evidence] };
+    // D-0025: links de midia das versoes (a RLS ja esconde o que o cliente nao ve).
+    const mediaLinks = versions.length ? await listMediaLinks(s, { versionId: { in: versions.map((v) => v.id) } }) : [];
+    return { content, versions, approvals, comments, assets: [...assets, ...evidence], mediaLinks };
   });
 }
 
@@ -40,7 +43,8 @@ export async function getScriptView(db: Db, ctx: TenantContext, scriptId: string
     const assets = await listLinkedAssets(s, {
       OR: [{ scriptId }, ...(recordings.length ? [{ recordingId: { in: recordings.map((r) => r.id) } }] : [])],
     });
-    return { script, recordings, comments, assets };
+    const mediaLinks = await listMediaLinks(s, { OR: [{ scriptId }, ...(recordings.length ? [{ recordingId: { in: recordings.map((r) => r.id) } }] : [])] });
+    return { script, recordings, comments, assets, mediaLinks };
   });
 }
 

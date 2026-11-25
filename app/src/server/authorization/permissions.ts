@@ -34,7 +34,13 @@ export type Action =
   | "asset:read"
   | "asset:upload"
   | "asset:attach"
-  | "asset:delete_any";
+  | "asset:delete_any"
+  // D-0025: links de midia externos (mesmas pessoas que anexam arquivo; o cliente so em gravacao dele, o banco confere)
+  | "media_link:read"
+  | "media_link:create"
+  | "media_link:remove"
+  // D-0026: o dono do cliente gerencia a equipe (colaboradores) do proprio cliente
+  | "team:manage";
 
 const CLIENT_SIDE_COMMON: readonly Action[] = [
   "client:read",
@@ -47,6 +53,9 @@ const CLIENT_SIDE_COMMON: readonly Action[] = [
   "recording:submit",
   "asset:read",
   "asset:upload",
+  "media_link:read",
+  "media_link:create",
+  "media_link:remove",
 ];
 
 const BY_MEMBER_ROLE: Record<string, readonly Action[]> = {
@@ -73,8 +82,11 @@ const BY_MEMBER_ROLE: Record<string, readonly Action[]> = {
     "asset:read",
     "asset:upload",
     "asset:attach",
+    "media_link:read",
+    "media_link:create",
+    "media_link:remove",
   ],
-  CLIENT_OWNER: [...CLIENT_SIDE_COMMON, "member:read", "content:approve"],
+  CLIENT_OWNER: [...CLIENT_SIDE_COMMON, "member:read", "content:approve", "team:manage"],
   // So aprova com a concessao explicita "content:approve" em client_members.permissions.
   CLIENT_COLLABORATOR: [...CLIENT_SIDE_COMMON],
 };

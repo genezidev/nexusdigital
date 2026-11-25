@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { NoActiveClient } from "@/components/app/portal-gate";
 import { ContentStatusBadge } from "@/components/app/status-badges";
 import { AttachmentList } from "@/components/fase2/attachments";
+import { MediaLinkList } from "@/components/fase2/media-links";
 import { CommentsPanel } from "@/components/fase2/comments-panel";
 import { DecisionPanel } from "@/components/fase2/decision-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,9 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/formatting/date";
 import { CHANNEL_LABEL, DECISION_LABEL, FORMAT_LABEL, formatDay } from "@/lib/labels";
+import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { NotFoundError } from "@/server/errors";
-import { approvalOut, commentOut, contentPortalOut, linkedAssetPortalOut, versionPortalOut } from "@/server/http/dto-fase2";
+import { approvalOut, commentOut, contentPortalOut, linkedAssetPortalOut, mediaLinkPortalOut, versionPortalOut } from "@/server/http/dto-fase2";
 import { loadPortalScope, one, type SearchParams } from "@/server/page-data";
 import { isUuid } from "@/server/services/access";
 import { getContentView } from "@/server/services/queries";
@@ -39,6 +41,8 @@ export default async function PortalContentDetail({ params, searchParams }: { pa
         approvals: v.approvals.map((x) => approvalOut.parse({ ...x, authorName: x.author.name })),
         comments: v.comments.map((c) => commentOut.parse({ ...c, authorName: c.author.name })),
         assets: v.assets.map((a) => linkedAssetPortalOut.parse(a)),
+        mediaLinks: v.mediaLinks.map((m) => mediaLinkPortalOut.parse(m)),
+        uploadsEnabled: getServerEnv().UPLOADS_ENABLED,
         viewing: one(sp, "v"),
       },
     };
@@ -114,9 +118,19 @@ export default async function PortalContentDetail({ params, searchParams }: { pa
                   <p className="text-sm break-words">{shown.hashtags.length ? shown.hashtags.join(" ") : "N/D"}</p>
                 </div>
                 <div>
-                  <h3 className="mb-2 text-base font-semibold">Arquivos</h3>
-                  <AttachmentList scope={scopeApi} items={shownAssets.map(toItem)} />
+                  <h3 className="mb-2 text-base font-semibold">Links de mídia</h3>
+                  <MediaLinkList
+                    scope={scopeApi}
+                    items={d.mediaLinks.filter((m) => m.versionId === shown.id).map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind }))}
+                    emptyText="Nenhum link de mídia nesta versão."
+                  />
                 </div>
+                {d.uploadsEnabled ? (
+                  <div>
+                    <h3 className="mb-2 text-base font-semibold">Arquivos</h3>
+                    <AttachmentList scope={scopeApi} items={shownAssets.map(toItem)} />
+                  </div>
+                ) : null}
               </>
             ) : null}
 
@@ -133,7 +147,7 @@ export default async function PortalContentDetail({ params, searchParams }: { pa
           </CardContent>
         </Card>
 
-        {content.publicationUrl || evidence.length > 0 ? (
+        {content.publicationUrl || (d.uploadsEnabled && evidence.length > 0) ? (
           <Card>
             <CardHeader>
               <CardTitle>Publicação</CardTitle>
@@ -141,7 +155,7 @@ export default async function PortalContentDetail({ params, searchParams }: { pa
             <CardContent className="flex flex-col gap-3">
               {content.publishedAt ? <p className="text-sm">Publicada em {formatDateTime(content.publishedAt, tz)}.</p> : null}
               {content.publicationUrl ? <ExternalLink href={content.publicationUrl} label="Ver publicação" /> : null}
-              {evidence.length > 0 ? <AttachmentList scope={scopeApi} items={evidence.map(toItem)} /> : null}
+              {d.uploadsEnabled && evidence.length > 0 ? <AttachmentList scope={scopeApi} items={evidence.map(toItem)} /> : null}
             </CardContent>
           </Card>
         ) : null}

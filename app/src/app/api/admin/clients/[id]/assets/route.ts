@@ -8,6 +8,7 @@ export const GET = route<{ id: string }>(async (req, { params, requestId }) => {
 });
 
 export const POST = route<{ id: string }>(async (req, { params, requestId }) => {
+  h.assertUploadsEnabled();
   const a = await adminCtx(req, params.id);
   return h.postAssetInit(a, req, requestId);
 });

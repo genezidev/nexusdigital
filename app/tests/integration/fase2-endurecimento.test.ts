@@ -123,8 +123,8 @@ describe("B-2: o cliente nao escreve papel, permissoes nem status de membro (nem
     expect((await memberOf(w.ownerA.id)).status).toBe("ACTIVE");
   });
 
-  it("o dono do cliente tambem nao altera membros; criar e apagar membro por SQL do cliente e recusado", async () => {
-    await expect(sql(owner, `UPDATE client_members SET permissions = ARRAY['content:approve'] WHERE user_id = '${w.collabA.id}'`)).rejects.toThrow(/membro|admin/i);
+  it("o dono do cliente nao muda papel de ninguem; criar e apagar membro por SQL do cliente e recusado (D-0026 so abre permissoes e acesso de colaborador)", async () => {
+    await expect(sql(owner, `UPDATE client_members SET role = 'CLIENT_OWNER' WHERE user_id = '${w.collabA.id}'`)).rejects.toThrow(/membro|admin/i);
     await expect(sql(owner, `DELETE FROM client_members WHERE user_id = '${w.collabA.id}'`)).rejects.toThrow(/membro|admin/i);
     await expect(
       sql(owner, `INSERT INTO client_members (client_id, user_id, role) VALUES ('${w.clientA}', '${w.ownerB.id}', 'CLIENT_OWNER')`),
@@ -178,6 +178,7 @@ describe("gatilhos de regra valem tambem com session_replication_role = replica 
       "approvals_client_permission_guard",
       "client_members_admin_only",
       "invitations_admin_only",
+      "media_links_guard",
     ];
     const byName = new Map(rows.map((r) => [r.tgname, r.tgenabled]));
     for (const name of wanted) expect(byName.get(name), name).toBe("A");

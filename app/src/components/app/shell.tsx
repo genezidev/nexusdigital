@@ -16,6 +16,7 @@ import {
   Menu,
   ScrollText,
   UserRound,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -51,6 +52,7 @@ const ICONS = {
   scripts: Clapperboard,
   approvals: ClipboardCheck,
   plan: BadgeCheck,
+  team: Users,
 } satisfies Record<string, LucideIcon>;
 
 export interface NavItem {

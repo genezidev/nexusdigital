@@ -162,6 +162,26 @@ export const attachBody = z
     contentId: uuid.optional(),
   })
   .refine((v) => [v.versionId, v.scriptId, v.recordingId, v.contentId].filter(Boolean).length === 1, "Informe exatamente um destino.");
+// D-0025: link de midia externo. A URL aqui so e aparada; a validacao real (https, lista de dominios) e do servidor
+// (domain/media-link.ts) e devolve a mensagem em `fields.url`.
+export const MEDIA_KINDS = ["IMAGEM", "VIDEO", "PDF", "DOCUMENTO", "OUTRO"] as const;
+const mediaLabel = z
+  .string({ error: "Informe um titulo curto." })
+  .trim()
+  .min(1, "Informe um titulo curto.")
+  .max(120, "O titulo pode ter no maximo 120 caracteres.")
+  .refine((v) => !/\p{Cc}/u.test(v), "O titulo nao pode ter caracteres de controle.");
+const mediaFields = {
+  label: mediaLabel,
+  url: z.string({ error: "Cole o link da midia." }).trim().max(4096, "O link e longo demais."),
+  kind: z.enum(MEDIA_KINDS, { error: "Escolha o tipo da midia." }),
+};
+export const mediaLinkBody = z
+  .strictObject({ ...mediaFields, versionId: uuid.optional(), scriptId: uuid.optional(), recordingId: uuid.optional() })
+  .refine((v) => [v.versionId, v.scriptId, v.recordingId].filter(Boolean).length === 1, "Informe exatamente um destino.");
+export const portalMediaLinkBody = z.strictObject({ ...mediaFields, recordingId: uuid });
+export const mediaLinkListQuery = z.object({ versionId: uuid.optional(), scriptId: uuid.optional(), recordingId: uuid.optional() });
+
 export const reorderBody = z.strictObject({ position: z.number().int().min(0).max(1000) });
 
 // ---------- consultas ----------

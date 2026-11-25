@@ -5,10 +5,11 @@ import { isAgency } from "@/server/authorization/permissions";
 import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { DEFAULT_RECORDING_DOMAINS } from "@/server/domain/external-link";
+import { NotFoundError } from "@/server/errors";
 import type { Authorized } from "@/server/http/api";
 import { limitMutation, parseQuery, uuid } from "@/server/http/api";
 import { commentRow } from "@/server/http/handlers/content";
-import { linkedAssetAgencyOut, linkedAssetPortalOut, page, recordingOut, scriptAgencyOut, scriptPortalOut } from "@/server/http/dto-fase2";
+import { linkedAssetAgencyOut, linkedAssetPortalOut, mediaLinkAgencyOut, mediaLinkPortalOut, page, recordingOut, scriptAgencyOut, scriptPortalOut } from "@/server/http/dto-fase2";
 import { parseBody } from "@/server/http/handler";
 import { json } from "@/server/http/respond";
 import { addComment } from "@/server/services/contents";
@@ -36,6 +37,7 @@ export async function getScriptResponse(a: Authorized, scriptId: string, request
       recordings: v.recordings.map((r) => recordingRow(r)),
       comments: v.comments.map((c) => commentRow(c)),
       assets: v.assets.map((x) => (agency ? linkedAssetAgencyOut : linkedAssetPortalOut).parse(x)),
+      mediaLinks: v.mediaLinks.map((m) => (agency ? mediaLinkAgencyOut : mediaLinkPortalOut).parse(m)),
     },
     200,
     requestId,
@@ -76,6 +78,8 @@ export async function postRecording(a: Authorized, req: NextRequest, scriptId: s
   await limitMutation("recording", a.ctx.userId);
   const b = await parseBody(req, recordingBody);
   const env = getServerEnv();
+  // D-0025: gravacao por arquivo so existe com o envio de arquivo ligado; a por link nao depende dele.
+  if (b.assetId && !env.UPLOADS_ENABLED) throw new NotFoundError();
   const r = await submitRecording(getDb(), a.ctx, {
     scriptId: uuid(scriptId),
     assetId: b.assetId,

@@ -97,6 +97,8 @@ export async function listRecordings(s: Scoped, scriptId: string) {
       imageRightsConfirmedAt: true,
       feedback: true,
       reviewedAt: true,
+      // O DTO do portal descarta o id; a tela so o usa para saber se a gravacao e da propria pessoa.
+      submittedById: true,
       submittedBy: { select: { name: true } },
     },
     orderBy: { submittedAt: "asc" },

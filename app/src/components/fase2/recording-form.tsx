@@ -17,7 +17,7 @@ import type { UploadLimits } from "@/lib/upload-rules";
  * Envio da gravacao: por arquivo (video) OU por link HTTPS de servico autorizado. Subir o arquivo NAO avisa a agencia:
  * so "Marcar como enviada" cria a gravacao. Antes, o cliente confirma a autorizacao das pessoas que aparecem.
  */
-export function RecordingForm({ scope, scriptId, limits, domains }: { scope: Scope; scriptId: string; limits: UploadLimits; domains: string[] }) {
+export function RecordingForm({ scope, scriptId, limits, domains, uploadsEnabled = true }: { scope: Scope; scriptId: string; limits: UploadLimits; domains: string[]; uploadsEnabled?: boolean }) {
   const router = useRouter();
   const id = useId();
   const [asset, setAsset] = useState<{ id: string; name: string; bytes: number } | null>(null);
@@ -49,26 +49,28 @@ export function RecordingForm({ scope, scriptId, limits, domains }: { scope: Sco
 
   return (
     <div className="flex flex-col gap-4" data-testid="recording-form">
-      <FileUploader
-        scope={scope}
-        limits={limits}
-        allowed={["VIDEO"]}
-        visibility="COMPARTILHADO"
-        label="Arquivo de vídeo da gravação"
-        help="Vídeos MP4, MOV ou WebM."
-        buttonLabel="Enviar vídeo"
-        onUploaded={(a, file) => setAsset({ id: a.id, name: file.name, bytes: a.bytes })}
-      />
+      {uploadsEnabled ? (
+        <FileUploader
+          scope={scope}
+          limits={limits}
+          allowed={["VIDEO"]}
+          visibility="COMPARTILHADO"
+          label="Arquivo de vídeo da gravação"
+          help="Vídeos MP4, MOV ou WebM."
+          buttonLabel="Enviar vídeo"
+          onUploaded={(a, file) => setAsset({ id: a.id, name: file.name, bytes: a.bytes })}
+        />
+      ) : null}
       {asset ? (
         <p className="text-sm" role="status">
           Arquivo pronto: <span className="font-medium break-all">{asset.name}</span> ({formatBytes(asset.bytes)}). Falta marcar como enviada.
         </p>
       ) : null}
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${id}-url`}>Ou cole o link da gravação</Label>
+        <Label htmlFor={`${id}-url`}>{uploadsEnabled ? "Ou cole o link da gravação" : "Cole o link da gravação"}</Label>
         <Input id={`${id}-url`} type="url" inputMode="url" autoComplete="off" value={url} disabled={!!asset} onChange={(e) => setUrl(e.target.value)} aria-describedby={`${id}-hint`} />
         <p id={`${id}-hint`} className="text-sm text-muted-foreground">
-          Só links https:// de {domains.length ? domains.join(", ") : "serviços autorizados"}. O sistema não abre nem baixa o link.
+          Só links https:// de {domains.length ? domains.join(", ") : "serviços autorizados"}. O sistema não abre nem baixa o link. Deixe o arquivo com acesso “qualquer pessoa com o link” para a agência conseguir abrir.
         </p>
       </div>
       <div className="flex items-start gap-3">

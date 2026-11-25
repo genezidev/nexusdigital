@@ -76,6 +76,7 @@ model User {
   recordingsSubmitted Recording[]      @relation("RecordingSubmitter")
   recordingsReviewed  Recording[]      @relation("RecordingReviewer")
   assetsUploaded      Asset[]          @relation("AssetUploader")
+  mediaLinksCreated   MediaLink[]      @relation("MediaLinkCreator")
 
   @@unique([email])
   @@map("users")
@@ -184,6 +185,7 @@ model Client {
   recordings      Recording[]
   assets          Asset[]
   assetLinks      AssetLink[]
+  mediaLinks      MediaLink[]
 
   @@unique([slug])
   @@map("clients")
@@ -213,6 +215,8 @@ model Invitation {
   clientId     String     @map("client_id") @db.Uuid
   email        String
   role         MemberRole
+  // D-0026: concessoes que o membro recebe ao aceitar (so "content:approve" e aceita, e so para colaborador).
+  permissions  String[]   @default([])
   tokenHash    String     @map("token_hash")
   expiresAt    DateTime   @map("expires_at") @db.Timestamptz(3)
   usedAt       DateTime?  @map("used_at") @db.Timestamptz(3)
@@ -511,6 +515,7 @@ model ContentVersion {
   approvals  Approval[]
   comments   Comment[]
   assetLinks AssetLink[]
+  mediaLinks MediaLink[]
 
   @@unique([contentId, number])
   @@unique([clientId, id])
@@ -592,6 +597,7 @@ model Script {
   recordings Recording[]
   comments   Comment[]
   assetLinks AssetLink[]
+  mediaLinks MediaLink[]
 
   @@unique([clientId, id])
   @@index([clientId, status])
@@ -638,6 +644,7 @@ model Recording {
   submittedBy User        @relation("RecordingSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
   reviewedBy  User?       @relation("RecordingReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
   assetLinks  AssetLink[]
+  mediaLinks  MediaLink[]
 
   @@unique([clientId, id])
   @@index([clientId, scriptId, submittedAt])
@@ -705,6 +712,45 @@ model AssetLink {
   @@index([clientId, recordingId])
   @@index([clientId, contentId])
   @@map("asset_links")
+}
+
+enum MediaKind {
+  IMAGEM
+  VIDEO
+  PDF
+  DOCUMENTO
+  OUTRO
+}
+
+// D-0025: midia por LINK externo (Google Drive, YouTube...). Guarda so o texto do endereco ja validado e normalizado
+// (domain/media-link.ts); o servidor nunca baixa nada dele. Exatamente um destino (CHECK): versao, roteiro ou gravacao.
+model MediaLink {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId    String    @map("client_id") @db.Uuid
+  versionId   String?   @map("version_id") @db.Uuid
+  scriptId    String?   @map("script_id") @db.Uuid
+  recordingId String?   @map("recording_id") @db.Uuid
+  label       String
+  url         String
+  host        String
+  kind        MediaKind
+  createdById String    @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  client    Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  version   ContentVersion? @relation(fields: [clientId, versionId], references: [clientId, id], onDelete: Restrict)
+  script    Script?         @relation(fields: [clientId, scriptId], references: [clientId, id], onDelete: Restrict)
+  recording Recording?      @relation(fields: [clientId, recordingId], references: [clientId, id], onDelete: Restrict)
+  createdBy User            @relation("MediaLinkCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([clientId, id])
+  @@unique([versionId, url])
+  @@unique([scriptId, url])
+  @@unique([recordingId, url])
+  @@index([clientId, versionId])
+  @@index([clientId, scriptId])
+  @@index([clientId, recordingId])
+  @@map("media_links")
 }
 
 // Configuracao da instalacao (migration 20261125140000). Hoje so guarda `installation_id`, o identificador

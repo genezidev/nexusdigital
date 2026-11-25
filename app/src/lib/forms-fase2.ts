@@ -127,6 +127,12 @@ export const publishForm = z.object({
   publicationUrl: optText(2048),
 });
 
+export const mediaLinkForm = z.object({
+  label: reqText("um título curto", 120),
+  url: reqText("o link da mídia", 4096),
+  kind: z.enum(["IMAGEM", "VIDEO", "PDF", "DOCUMENTO", "OUTRO"], { error: "Escolha o tipo da mídia." }),
+});
+
 export const commentForm = z.object({ body: reqText("o comentário", 2000), visibility: z.enum(["INTERNO", "COMPARTILHADO"]) });
 
 export const sceneForm = z.object({ dialogue: optText(4000), action: optText(4000), durationSeconds: optionalIntText("a duração", 0, 36000) });

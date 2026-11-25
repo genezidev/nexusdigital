@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidMediaHostEntry } from "@/server/domain/media-link";
 import { INTERNAL_IP_HEADER, isValidProxyEntry } from "@/server/http/client-ip";
 
 // Variaveis do SERVIDOR (nenhuma tem prefixo NEXT_PUBLIC_). Validadas na primeira leitura:
@@ -93,6 +94,20 @@ const schema = z
     COMMENT_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(60),
     RECORDING_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(20),
     CONTENT_CREATE_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(120),
+    // D-0025: midia por LINK externo. O envio de arquivo (todo o bloco de armazenamento acima) fica desligado por padrao;
+    // so `true` liga as rotas de pedido, envio e download de arquivo e a interface de upload.
+    UPLOADS_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Servicos extras aceitos nos links de midia (CSV de dominios, sem esquema nem caminho), somados a lista padrao
+    // de domain/media-link.ts. Valor invalido derruba a partida (mensagem so cita o nome da variavel).
+    MEDIA_LINK_EXTRA_HOSTS: z
+      .string()
+      .max(2000)
+      .optional()
+      .refine((v) => csv(v).length <= 32 && csv(v).every((h) => isValidMediaHostEntry(h.toLowerCase())), "MEDIA_LINK_EXTRA_HOSTS precisa listar dominios simples (sem esquema, porta ou caminho)"),
+    // Limite por pessoa (janela de 10 min) para cadastrar e remover links de midia.
+    MEDIA_LINK_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(60),
+    // Limite por pessoa (janela de 10 min) para convidar e gerenciar a equipe do proprio cliente (D-0026).
+    TEAM_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(20),
     // Dominios autorizados para link de gravacao (CSV). Vazio = lista padrao do codigo (domain/external-link.ts).
     RECORDING_LINK_DOMAINS: z.string().max(2000).optional(),
   })
@@ -116,6 +131,8 @@ const schema = z
     APP_URL: value.APP_URL ?? "http://localhost:3000",
     TRUST_PROXY: value.TRUST_PROXY ?? "false",
     TRUSTED_PROXIES: csv(value.TRUSTED_PROXIES),
+    UPLOADS_ENABLED: value.UPLOADS_ENABLED === "true",
+    MEDIA_LINK_EXTRA_HOSTS: csv(value.MEDIA_LINK_EXTRA_HOSTS).map((d) => d.toLowerCase()),
     RECORDING_LINK_DOMAINS: csv(value.RECORDING_LINK_DOMAINS).map((d) => d.toLowerCase()),
   }));
 

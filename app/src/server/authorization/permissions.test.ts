@@ -34,6 +34,12 @@ describe("matriz de permissoes da fase 2", () => {
     ["asset:upload", true, true, true, true],
     ["asset:attach", true, true, false, false],
     ["asset:delete_any", true, false, false, false],
+    // D-0025: links de midia (cliente le, cadastra e remove; o banco limita o cliente a gravacao dele e ao que ele cadastrou)
+    ["media_link:read", true, true, true, true],
+    ["media_link:create", true, true, true, true],
+    ["media_link:remove", true, true, true, true],
+    // D-0026: so o dono (e o admin) gerenciam a equipe; colaborador e STAFF nao
+    ["team:manage", true, false, true, false],
   ];
   it.each(rows)("%s", (action, admin, staff, owner, collab) => {
     expect(can(ADMIN, action), "ADMIN").toBe(admin);
@@ -47,6 +53,11 @@ describe("matriz de permissoes da fase 2", () => {
     expect(can(ctx("USER", "CLIENT_COLLABORATOR", ["content:write", "plan:manage", "content:classify"]), "content:write")).toBe(false);
     expect(can(ctx("USER", "CLIENT_COLLABORATOR", ["plan:manage"]), "plan:manage")).toBe(false);
     expect(can(ctx("USER", "CLIENT_OWNER", ["content:write"]), "content:write")).toBe(false);
+  });
+
+  it("team:manage nao e concedivel: nem a colaborador nem por entrada em permissions", () => {
+    expect(can(ctx("USER", "CLIENT_COLLABORATOR", ["team:manage"]), "team:manage")).toBe(false);
+    expect(can(ctx("STAFF", "STAFF", ["team:manage"]), "team:manage")).toBe(false);
   });
 
   it("STAFF pode ter content:write e script:write revogados por entrada negativa", () => {

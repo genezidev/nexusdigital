@@ -54,6 +54,11 @@ const armazenamento = {
   COMMENT_RATE_MAX: process.env.COMMENT_RATE_MAX ?? "1000",
   RECORDING_RATE_MAX: process.env.RECORDING_RATE_MAX ?? "1000",
   CONTENT_CREATE_RATE_MAX: process.env.CONTENT_CREATE_RATE_MAX ?? "1000",
+  // D-0025: o app real nasce com upload DESLIGADO; os testes que provam a funcionalidade de arquivo ligam (padrao aqui)
+  // e uma instancia separada (NEXO_TEST_UPLOADS=false) prova que sem a chave nao ha rota. Limites de link e de equipe folgados.
+  UPLOADS_ENABLED: process.env.NEXO_TEST_UPLOADS ?? "true",
+  MEDIA_LINK_RATE_MAX: process.env.MEDIA_LINK_RATE_MAX ?? "1000",
+  TEAM_RATE_MAX: process.env.TEAM_RATE_MAX ?? "1000",
 };
 
 const next = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));

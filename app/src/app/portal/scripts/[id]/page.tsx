@@ -6,6 +6,7 @@ import { RecordingHistory, ScriptInstructions, type RecordingData } from "@/comp
 import { ScriptStatusBadge } from "@/components/app/status-badges";
 import { AttachmentList } from "@/components/fase2/attachments";
 import { CommentsPanel } from "@/components/fase2/comments-panel";
+import { MediaLinkForm, MediaLinkList } from "@/components/fase2/media-links";
 import { RecordingForm } from "@/components/fase2/recording-form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { DEFAULT_RECORDING_DOMAINS } from "@/server/domain/external-link";
 import { NotFoundError } from "@/server/errors";
-import { commentOut, linkedAssetPortalOut, recordingOut, scriptPortalOut } from "@/server/http/dto-fase2";
+import { commentOut, linkedAssetPortalOut, mediaLinkPortalOut, recordingOut, scriptPortalOut } from "@/server/http/dto-fase2";
 import { loadPortalScope, loadUploadLimits } from "@/server/page-data";
 import { isUuid } from "@/server/services/access";
 import { getScriptView } from "@/server/services/queries";
@@ -35,6 +36,10 @@ export default async function PortalScriptDetail({ params }: { params: Promise<{
         recordings: v.recordings.map((r) => recordingOut.parse(r)),
         comments: v.comments.map((c) => commentOut.parse({ ...c, authorName: c.author.name })),
         assets: v.assets.map((a) => linkedAssetPortalOut.parse(a)),
+        // `mine` e calculado ANTES do DTO: o portal nunca recebe o id de quem cadastrou, so se foi a propria pessoa.
+        mediaLinks: v.mediaLinks.map((m) => ({ ...mediaLinkPortalOut.parse(m), mine: m.createdById === scope.active!.ctx.userId })),
+        myRecordingIds: v.recordings.filter((r) => r.submittedById === scope.active!.ctx.userId).map((r) => r.id),
+        uploadsEnabled: getServerEnv().UPLOADS_ENABLED,
         limits: loadUploadLimits(),
         domains: env.length ? env : [...DEFAULT_RECORDING_DOMAINS],
       },
@@ -52,7 +57,11 @@ export default async function PortalScriptDetail({ params }: { params: Promise<{
     .map((a) => ({ linkId: a.link.id, role: a.link.role, position: a.link.position, asset: { id: a.asset.id, originalName: a.asset.originalName, category: a.asset.category, bytes: a.asset.bytes, status: a.asset.status } }));
   const recordings: RecordingData[] = d.recordings.map((r) => {
     const link = d.assets.find((a) => a.link.recordingId === r.id);
-    return { ...r, asset: link ? { id: link.asset.id, originalName: link.asset.originalName, bytes: link.asset.bytes } : undefined };
+    return {
+      ...r,
+      asset: link ? { id: link.asset.id, originalName: link.asset.originalName, bytes: link.asset.bytes } : undefined,
+      mediaLinks: d.mediaLinks.filter((m) => m.recordingId === r.id).map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind, removable: m.mine })),
+    };
   });
   const awaiting = script.status === "AGUARDANDO_GRAVACAO";
   const lastFeedback = recordings.find((r) => r.status === "REGRAVACAO_SOLICITADA" && r.feedback);
@@ -82,10 +91,16 @@ export default async function PortalScriptDetail({ params }: { params: Promise<{
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Roteiro em PDF</CardTitle>
+            <CardTitle>Materiais do roteiro</CardTitle>
+            <CardDescription>Referências e o roteiro em PDF, em links que a agência cadastrou.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <AttachmentList scope={scopeApi} items={pdfs} />
+          <CardContent className="flex flex-col gap-4">
+            <MediaLinkList
+              scope={scopeApi}
+              items={d.mediaLinks.filter((m) => m.scriptId === script.id).map((m) => ({ id: m.id, label: m.label, url: m.url, host: m.host, kind: m.kind }))}
+              emptyText="Nenhum material cadastrado neste roteiro."
+            />
+            {d.uploadsEnabled && pdfs.length > 0 ? <AttachmentList scope={scopeApi} items={pdfs} /> : null}
           </CardContent>
         </Card>
         <Card>
@@ -95,7 +110,7 @@ export default async function PortalScriptDetail({ params }: { params: Promise<{
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             {awaiting && scope.active.canSubmitRecording ? (
-              <RecordingForm scope={scopeApi} scriptId={script.id} limits={d.limits} domains={d.domains} />
+              <RecordingForm scope={scopeApi} scriptId={script.id} limits={d.limits} domains={d.domains} uploadsEnabled={d.uploadsEnabled} />
             ) : awaiting ? (
               <Alert>
                 <AlertDescription>Você não tem permissão para enviar gravações neste cliente.</AlertDescription>
@@ -105,7 +120,21 @@ export default async function PortalScriptDetail({ params }: { params: Promise<{
             )}
             <div>
               <h3 className="mb-2 text-base font-semibold">Envios e retorno da agência</h3>
-              <RecordingHistory recordings={recordings} scope={scopeApi} timeZone={tz} />
+              <RecordingHistory
+                recordings={recordings}
+                scope={scopeApi}
+                timeZone={tz}
+                actions={(r) =>
+                  scope.active!.canSubmitRecording && d.myRecordingIds.includes(r.id) ? (
+                    <details>
+                      <summary className="cursor-pointer text-sm font-medium">Adicionar outro link de mídia a esta gravação</summary>
+                      <div className="mt-3">
+                        <MediaLinkForm scope={scopeApi} target={{ recordingId: r.id }} audience="portal" />
+                      </div>
+                    </details>
+                  ) : null
+                }
+              />
             </div>
           </CardContent>
         </Card>

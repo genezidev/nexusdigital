@@ -1,6 +1,7 @@
 import { ExternalLink } from "@/components/app/external-link";
 import { RecordingStatusBadge } from "@/components/app/status-badges";
 import { DownloadButton } from "@/components/app/download-button";
+import { MediaLinkList, type MediaLinkItem } from "@/components/fase2/media-links";
 import type { Scope } from "@/lib/api/client";
 import { formatDateTime } from "@/lib/formatting/date";
 import { formatBytes, formatDay, formatDuration } from "@/lib/labels";
@@ -31,6 +32,8 @@ export interface RecordingData {
   reviewedAt: string | null;
   submittedBy: string;
   asset?: { id: string; originalName: string; bytes: number | null };
+  /** Links de midia extras da gravacao (D-0025). */
+  mediaLinks?: MediaLinkItem[];
 }
 
 function Item({ label, children }: { label: string; children: ReactNode }) {
@@ -127,6 +130,11 @@ export function RecordingHistory({ recordings, scope, timeZone, actions }: { rec
               </>
             ) : null}
           </div>
+          {r.mediaLinks && r.mediaLinks.length > 0 ? (
+            <div className="mt-3">
+              <MediaLinkList scope={scope} items={r.mediaLinks} />
+            </div>
+          ) : null}
           <p className="mt-2 text-muted-foreground">
             {r.imageRightsConfirmedAt ? `Autorização das pessoas confirmada em ${formatDateTime(r.imageRightsConfirmedAt, timeZone)}.` : "Autorização das pessoas não registrada."}
           </p>

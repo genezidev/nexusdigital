@@ -13,6 +13,9 @@ const NAV: NavItem[] = [
   { href: "/portal/profile", label: "Perfil", icon: "profile" },
 ];
 
+// D-0026: "Equipe" so aparece para o dono do cliente ativo. E conveniencia: a pagina e a API conferem de novo no servidor.
+const NAV_OWNER: NavItem[] = [...NAV.slice(0, -1), { href: "/portal/team", label: "Equipe", icon: "team" }, NAV[NAV.length - 1]];
+
 // Portal do cliente. A lista de clientes do seletor vem do banco (participacoes ativas da pessoa logada);
 // o "cliente ativo" mostrado so conta se ainda estiver nessa lista. Cada pagina repete a decisao de acesso.
 export default async function PortalLayout({ children }: { children: ReactNode }) {
@@ -24,7 +27,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
       area="portal"
       user={{ name: actor.name, email: actor.email, roleLabel: active ? ROLE_LABEL[active.role] : "Cliente" }}
       themePreference={actor.themePreference}
-      nav={NAV}
+      nav={active?.role === "CLIENT_OWNER" ? NAV_OWNER : NAV}
       contextLabel={active?.name ?? "Portal do cliente"}
       profileHref="/portal/profile"
       switcher={{ activeClientId: active?.id ?? null, clients: clients.map((c) => ({ id: c.id, name: c.name })) }}

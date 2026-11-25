@@ -32,7 +32,7 @@ const KNOWN: Record<string, string> = {
   PASSWORD_TOO_SHORT: "A senha precisa ter pelo menos 12 caracteres.",
   PASSWORD_TOO_LONG: "A senha pode ter no máximo 128 caracteres.",
   INVALID_INVITATION: "Este convite é inválido ou expirou. Peça um novo ao administrador.",
-  EMAIL_TAKEN: "Já existe uma conta com este e-mail.",
+  EMAIL_TAKEN: "Já existe uma conta com este e-mail. Se a pessoa trabalha em outra empresa, fale com a agência para liberar o acesso.",
   INVITATION_PENDING: "Já existe um convite pendente para este e-mail.",
   EMAIL_UNAVAILABLE: "A recuperação de senha por e-mail não está disponível neste ambiente.",
   RATE_LIMITED: "Muitas tentativas. Aguarde um pouco e tente novamente.",
@@ -83,6 +83,9 @@ const KNOWN: Record<string, string> = {
   STORAGE_UNAVAILABLE: "O armazenamento está indisponível no momento. Nada foi salvo; tente novamente em instantes.",
   STORAGE_QUOTA_EXCEEDED: "A cota de armazenamento deste cliente acabou. Fale com a agência.",
   LINK_EXPIRED: "O link venceu. Peça um novo.",
+  // D-0025 e D-0026
+  MEDIA_LINK_DUPLICATE: "Este link já está cadastrado neste item.",
+  SELF_MANAGE: "Você não pode alterar o próprio acesso.",
 };
 
 const BY_STATUS: Record<number, string> = {
@@ -234,6 +237,16 @@ const apiFase2 = {
   detachLink: (clientId: string, linkId: string) => call("DELETE", `/api/admin/clients/${enc(clientId)}/asset-links/${enc(linkId)}`, okBody),
   setAssetVisibility: (clientId: string, assetId: string, visibility: "INTERNO" | "COMPARTILHADO") =>
     call("PATCH", `/api/admin/clients/${enc(clientId)}/assets/${enc(assetId)}`, okBody, { visibility }),
+  // D-0025: links de midia externos (so o texto do endereco; o servidor nunca o abre)
+  createMediaLink: (scope: Scope, input: { label: string; url: string; kind: string; versionId?: string; scriptId?: string; recordingId?: string }) =>
+    call("POST", `${base(scope)}/media-links`, idBody.extend({ host: z.string() }), input),
+  deleteMediaLink: (scope: Scope, id: string) => call("DELETE", `${base(scope)}/media-links/${enc(id)}`, okBody),
+  // D-0026: o dono do cliente gerencia a propria equipe (cliente vem da sessao)
+  inviteTeamMember: (input: { email: string; approve: boolean }) =>
+    call("POST", "/api/portal/team/invitations", z.object({ invitationId: z.uuid(), link: z.url(), expiresAt: z.string(), emailSent: z.boolean() }), input),
+  revokeTeamInvitation: (invitationId: string) => call("DELETE", `/api/portal/team/invitations/${enc(invitationId)}`, okBody),
+  setTeamMemberApproval: (memberId: string, approve: boolean) => call("PATCH", `/api/portal/team/members/${enc(memberId)}`, okBody.extend({ canApprove: z.boolean() }), { approve }),
+  setTeamMemberActive: (memberId: string, active: boolean) => call("PATCH", `/api/portal/team/members/${enc(memberId)}`, okBody.extend({ active: z.boolean() }), { active }),
   deleteAsset: (scope: Scope, assetId: string) => call("DELETE", `${base(scope)}/assets/${enc(assetId)}`, okBody),
   downloadLink: (scope: Scope, assetId: string) => call("POST", `${base(scope)}/assets/${enc(assetId)}/download`, downloadLink, {}),
 };
