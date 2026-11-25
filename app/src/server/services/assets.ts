@@ -4,7 +4,7 @@ import { assertCan, isAgency } from "@/server/authorization/permissions";
 import type { Db } from "@/server/db/client";
 import { withTenant } from "@/server/db/scope";
 import { checkAssetDeclaration, hasBlockedExtension } from "@/server/domain/asset-policy";
-import { DomainRuleError, NotFoundError } from "@/server/errors";
+import { AssetQuarantinedError, DomainRuleError, NotFoundError } from "@/server/errors";
 import {
   getAsset,
   getStorageKeyForDownload,
@@ -97,12 +97,17 @@ export async function reorderAsset(db: Db, ctx: TenantContext, linkId: string, p
   });
 }
 
-/** Autoriza o download: devolve a chave SO se o arquivo e DISPONIVEL e visivel para esta pessoa neste cliente. */
-export async function authorizeDownload(db: Db, ctx: TenantContext, assetId: string) {
+/**
+ * Autoriza o download: devolve a chave SO se o arquivo e DISPONIVEL e visivel para esta pessoa neste cliente, e
+ * recusa (423) arquivo em QUARENTENA. Com `audit`, grava na MESMA transacao que o link foi emitido (sem token, sem chave).
+ */
+export async function authorizeDownload(db: Db, ctx: TenantContext, assetId: string, opts: { audit?: boolean } = {}) {
   assertCan(ctx, "asset:read");
   return withTenant(db, ctx, async (s) => {
     const row = await getStorageKeyForDownload(s, assetId);
     if (!row) throw new NotFoundError();
+    if (row.scanStatus === "QUARENTENA") throw new AssetQuarantinedError();
+    if (opts.audit) await recordAudit(s, { action: "asset.download_link_issued", entityType: "asset", entityId: assetId });
     return row;
   });
 }

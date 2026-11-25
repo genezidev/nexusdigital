@@ -8,6 +8,8 @@ export const BASE_NO_PROXY = "http://127.0.0.1:3101";
 export const BASE_CHAIN = "http://127.0.0.1:3102";
 /** Variante com limites baixos de falhas por e-mail (3 por e-mail e IP, 6 por e-mail no total) e IP livre. */
 export const BASE_LOW = "http://127.0.0.1:3103";
+/** Variante com limites BAIXOS por pessoa nas mutacoes (decisao 2, comentario 3, gravacao 2, conteudo 3, envio dos bytes 2). */
+export const BASE_MUT = "http://127.0.0.1:3104";
 export { TEST_PASSWORD };
 
 /** IP unico por chamada: o app de teste confia em x-real-ip (TRUST_PROXY=true, como atras do proxy) e isola o limite por IP. */

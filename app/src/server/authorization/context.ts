@@ -25,7 +25,7 @@ export interface TenantContext {
 /** Escopo sem cliente (operacoes de ADMIN entre clientes e fluxos publicos por token). */
 export interface SystemContext {
   readonly [systemBrand]: true;
-  readonly reason: "admin" | "staff-area" | "public-token-flow" | "session-resolution" | "seed" | "maintenance";
+  readonly reason: "admin" | "staff-area" | "public-token-flow" | "session-resolution" | "seed" | "maintenance" | "storage-capacity";
   readonly userId: string | null;
 }
 
@@ -159,4 +159,12 @@ export function systemContextForSeed(): SystemContext {
 /** Uso exclusivo de tarefas de manutencao (limpeza de arquivos pendentes e orfaos): sem pessoa, sem handler. */
 export function systemContextForMaintenance(): SystemContext {
   return systemContext("maintenance", null);
+}
+
+/**
+ * Escopo de sistema SO para somar bytes ocupados entre clientes (teto global de armazenamento). Sem pessoa e sem
+ * handler proprio: quem usa devolve apenas um numero, nunca linhas de cliente.
+ */
+export function systemContextForStorageCapacity(): SystemContext {
+  return systemContext("storage-capacity", null);
 }

@@ -333,3 +333,24 @@ Escopo: telas admin e portal, upload com progresso, E2E de navegador, capturas e
 | Teclado: modal abre por Enter, Esc devolve foco; foco visivel e alvos de 44px | parcial: so um fluxo por teclado no E2E; 44px pelos componentes | `fase2-estados.spec.ts` |
 
 Nao provado: zoom de 200%, leitor de tela real, S3, proxy real, arquivo de 2 GB, navegador que nao seja Chromium. Nao implementado (sem backend): tela de permissoes finas de STAFF e colaborador, e-mail e notificacao, selo "aguardando o cliente ha N dias uteis" e "revisao acima do combinado". Problemas achados e corrigidos pelo E2E: `aria-label` que nao continha o texto visivel (axe `label-content-name-mismatch`), texto `sr-only` do calendario alargando a pagina a 768 px, e `setInputFiles` perdido antes da hidratacao (helper `chooseFile`).
+
+
+### Evidencias das correcoes da revisao independente (2026-11-25, agente de servidor)
+
+Escopo: achados da revisao independente de seguranca da fase 2 (somente leitura; o revisor nao rodou nada), corrigidos depois de **reproduzir cada um por teste**. Migration nova `20261125140000_endurecimento_revisao_fase2` (com `.down.sql` ensaiado). Decisoes: D-0020 a D-0023. Regras: R-19 a R-22 e R-5, R-10, R-16, R-17 revistas. Sem S3, sem envio em partes, sem ferramenta de terceiros, `objective` do roteiro no portal **nao** foi mudado (decisao pendente do dono, listada no handoff).
+
+| Criterio (spec: Armazenamento R-5, Casos-limite "Arquivo malicioso", "Cliente sem permissao") | Estado | Evidencia |
+|---|---|---|
+| Limpeza nao apaga dado por banco errado, backup antigo ou ambiente trocado: orfao vai para a lixeira (30 dias, restauravel); aborta com identificador divergente ou ausente, orfaos demais, banco sem `DISPONIVEL`; `--horas` minimo 1; `--ambiente` conferido contra o banco | provado (integracao, comando real contra `nexo_test`, unitario das regras) | `fase2-limpeza-capacidade.test.ts`, `fase2-arquivos.test.ts` (comando), `cleanup-policy.test.ts` |
+| Pedidos paralelos nao passam do limite de pendentes nem da cota; cota do cliente inteiro (inclui interno da agencia); PUT acima da cota recusa; teto global e espaco livre recusam com 507 | provado (integracao; espaco livre simulado, `fs.statfs` real so como numero) | `fase2-limpeza-capacidade.test.ts` |
+| Cliente nao muda status sem decisao, nao decide sem permissao, nao escreve membro nem convite (SQL direto como `nexo_app`) | provado | `fase2-endurecimento.test.ts` |
+| Todos os gatilhos de regra `ENABLE ALWAYS` | provado (`tgenabled = 'A'` em todo gatilho do esquema `public` e prova funcional com `session_replication_role = replica`) | idem |
+| Tipo `__proto__`, `constructor`, `toString`, `hasOwnProperty` recusado; Content-Disposition bem formado (barra invertida, CRLF, unicode, nome longo, RFC 5987) | provado (unitario) | `asset-policy.test.ts`, `content-disposition.test.ts` |
+| Limite por pessoa em decisao, comentario, gravacao, criacao de conteudo e PUT (429, outra pessoa livre, nada gravado no 429) | provado por HTTP real (instancia de limites baixos, porta 3104) | `tests/http/fase2-limites.test.ts` |
+| Auditoria de `editScript` e da emissao de link; comentarios so no registro imutavel | provado (integracao); comentario sem auditoria propria e decisao documentada | `fase2-limpeza-capacidade.test.ts`, D-0023 |
+| Download recusa arquivo em QUARENTENA (423) na emissao e na entrega | provado (integracao) | idem |
+| Producao so inicia com `APP_URL` https | provado (unitario e partida real com a variavel de escape de teste) | `env.test.ts`, `rate-limit.test.ts` |
+
+Nao provado: disco cheio real, volume dedicado e alerta de disco num servidor, limpeza agendada em producao, backup e restauracao da pasta, S3, proxy real, antivirus (nada define `QUARENTENA` sozinho), segunda revisao independente sobre estas correcoes. Mutacoes (codigo ou banco quebrado, suite rodada, restaurado): ver `contexto/HANDOFF.md`, secao "Fase 2: correcoes da revisao independente de seguranca".
+
+Prova final desta rodada (2026-11-25): `python scripts/verificar.py --executar`, 9 checagens OK e saida 0 (unitarios 525, integracao 211, HTTP 137, e2e 67). A primeira passada falhou so no e2e `P3` por uma corrida entre o envio da versao e o anexo da previa, alargada por uma soma lenta do teto global; a causa foi corrigida (`storage_bytes_total`) e o e2e passou a esperar o anexo.

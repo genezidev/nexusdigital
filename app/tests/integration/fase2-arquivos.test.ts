@@ -8,7 +8,7 @@ import { resolveTenantContext, type TenantContext } from "@/server/authorization
 import { signToken, signingSecret } from "@/server/storage/signed-token";
 import { createLocalStorage } from "@/server/storage/local-disk";
 import { attachAsset, detachAsset } from "@/server/services/assets";
-import { cleanupFiles, deliverDownload, receiveUpload, removeAsset, requestDownload, requestUpload, type FileDeps } from "@/server/services/files";
+import { bindInstallation, cleanupFiles, deliverDownload, receiveUpload, removeAsset, requestDownload, requestUpload, type FileDeps } from "@/server/services/files";
 import { appDb, makeUser, addMember, makeWorld, ownerDb, type World } from "./helpers/world";
 import { makePhase2, type Phase2Data } from "./helpers/phase2";
 
@@ -64,8 +64,12 @@ beforeAll(async () => {
     downloadTtlSeconds: 60,
     maxPendingPerUser: 5,
     clientQuotaBytes: 0,
+    globalQuotaBytes: 0,
+    minFreeBytes: 0,
     now: () => clock,
   };
+  // Pasta e banco da mesma instalacao: a limpeza so roda com o identificador vinculado (M-A).
+  await bindInstallation(appDb, deps.storage);
   admin = await resolveTenantContext(appDb, { userId: w.admin.id, activeClientId: w.clientA });
   ownerA = await resolveTenantContext(appDb, { userId: w.ownerA.id, activeClientId: w.clientA });
   collabA = await resolveTenantContext(appDb, { userId: w.collabA.id, activeClientId: w.clientA });
@@ -327,7 +331,7 @@ describe("download: autorizacao na emissao e na entrega", () => {
 });
 
 describe("limpeza idempotente (pendentes, orfaos e temporarios com mais de 24 h)", () => {
-  it("apaga pendente abandonado, objeto sem registro e temporario velho; nunca toca arquivo DISPONIVEL; segunda rodada nao muda nada", async () => {
+  it("apaga pendente abandonado e temporario velho, move o orfao para a lixeira; nunca toca arquivo DISPONIVEL; segunda rodada nao muda nada", async () => {
     const data = png(2000);
     const keep = (await upload(ownerA, { originalName: "fica.png", mimeType: "image/png", bytes: data.length }, data)).target.assetId;
     const stale = await requestUpload(appDb, ownerA, deps, { originalName: "abandonado.png", mimeType: "image/png", bytes: 100 });
@@ -340,16 +344,18 @@ describe("limpeza idempotente (pendentes, orfaos e temporarios com mais de 24 h)
 
     // agora: nada muda (tudo e recente)
     const fresh = await cleanupFiles(appDb, deps.storage, { now: new Date() });
-    expect(fresh).toMatchObject({ pendingExpired: 0, orphanObjectsRemoved: 0, tempRemoved: 0 });
+    expect(fresh).toMatchObject({ pendingExpired: 0, orphanObjectsTrashed: 0, tempRemoved: 0 });
     expect((await row(stale.assetId)).status).toBe("PENDENTE");
 
     const future = new Date(Date.now() + 25 * 3600_000);
     const first = await cleanupFiles(appDb, deps.storage, { now: future });
     expect(first.pendingExpired).toBeGreaterThanOrEqual(1);
-    expect(first.orphanObjectsRemoved).toBeGreaterThanOrEqual(1);
+    expect(first.orphanObjectsTrashed).toBeGreaterThanOrEqual(1);
     expect(first.tempRemoved).toBeGreaterThanOrEqual(1);
     expect((await row(stale.assetId)).status).toBe("EXCLUIDO");
     expect(await deps.storage.open(orphanKey)).toBeNull();
+    // o orfao NAO foi apagado: esta na lixeira, dentro da raiz do armazenamento
+    expect(await fs.stat(path.join(root, ".trash", orphanKey)).then((st) => st.isFile(), () => false)).toBe(true);
     expect(await fs.stat(tmp).then(() => true, () => false)).toBe(false);
     expect(await ownerDb.auditLog.count({ where: { action: "asset.pending_purged", entityId: stale.assetId } })).toBe(1);
     // DISPONIVEL intacto (so o objeto antigo seria candidato, e ele tem registro valido)
@@ -357,37 +363,87 @@ describe("limpeza idempotente (pendentes, orfaos e temporarios com mais de 24 h)
     expect(await objectExists(keep)).toBe(true);
 
     const second = await cleanupFiles(appDb, deps.storage, { now: future });
-    expect(second).toEqual({ pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsRemoved: 0, tempRemoved: 0 });
+    expect(second).toEqual({ pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsTrashed: 0, trashPurged: 0, tempRemoved: 0 });
   });
 });
 
 describe("comando de limpeza (scripts/limpar-arquivos.mjs)", () => {
-  it("roda contra nexo_test com o papel do app, imprime so contadores, e a segunda execucao nao muda nada", async () => {
+  const script = path.resolve(__dirname, "../../scripts/limpar-arquivos.mjs");
+  const cli = (dir: string, args: string[], extraEnv: Record<string, string> = {}) =>
+    spawnSync(process.execPath, [script, ...args], { env: { ...process.env, STORAGE_LOCAL_DIR: dir, NODE_ENV: "test", ...extraEnv }, encoding: "utf8" });
+  const lastJson = (text: string) => JSON.parse(text.trim().split(NL).pop()!) as Record<string, unknown>;
+  const ago = (hours: number) => new Date(Date.now() - hours * 3600_000);
+
+  it("roda contra nexo_test com o papel do app, vincula a instalacao so quando pedido, imprime so contadores, e a segunda execucao nao muda nada", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nexo-storage-cli-"));
     try {
       const cliStorage = createLocalStorage(dir);
-      const target = await requestUpload(appDb, ownerA, deps, { originalName: "cli.png", mimeType: "image/png", bytes: 100 });
+      // pendente abandonado ha 3 h (criado ja velho: o minimo do comando e 1 h) e orfao com mtime de 3 h atras
+      const target = await ownerDb.asset.create({
+        data: { clientId: w.clientA, storageKey: `clients/${w.clientA}/${randomUUID()}`, originalName: "cli.png", uploadedById: w.ownerA.id, mimeType: "image/png", bytes: 100, createdAt: ago(3) },
+      });
       const orphan = `clients/${w.clientA}/${randomUUID()}`;
       await cliStorage.put(orphan, body(Buffer.from("orfao")), { maxBytes: 100 });
-      const run = () =>
-        spawnSync(process.execPath, [path.resolve(__dirname, "../../scripts/limpar-arquivos.mjs"), "--ambiente", "test", "--horas", "0"], {
-          env: { ...process.env, STORAGE_LOCAL_DIR: dir, NODE_ENV: "test" },
-          encoding: "utf8",
-        });
-      const first = run();
+      await fs.utimes(path.join(dir, orphan), ago(3), ago(3));
+
+      // sem identificador na pasta: aborta, codigo 3, NADA e tocado e nada e criado em silencio
+      const semVinculo = cli(dir, ["--ambiente", "test", "--horas", "1"]);
+      expect(semVinculo.status, semVinculo.stderr).toBe(3);
+      expect(lastJson(semVinculo.stderr)).toMatchObject({ ok: false, abortado: "INSTALL_ID_MISSING" });
+      expect(await cliStorage.readInstallId()).toBeNull();
+      expect((await row(target.id)).status).toBe("PENDENTE");
+      expect(await cliStorage.open(orphan)).not.toBeNull();
+
+      const first = cli(dir, ["--ambiente", "test", "--horas", "1", "--vincular-instalacao"]);
       expect(first.status, first.stderr).toBe(0);
-      const out = JSON.parse(first.stdout.trim().split(NL).pop()!) as Record<string, unknown>;
-      expect(out).toMatchObject({ ok: true, horas: 0 });
+      const out = lastJson(first.stdout);
+      expect(out).toMatchObject({ ok: true, horas: 1, vinculo: "file-created", orphanObjectsTrashed: 1 });
       expect(out.pendingExpired as number).toBeGreaterThanOrEqual(1);
-      expect(out.orphanObjectsRemoved).toBe(1);
       expect(first.stdout + first.stderr).not.toMatch(/postgresql:|password|secret/i);
-      expect((await row(target.assetId)).status).toBe("EXCLUIDO");
+      expect((await row(target.id)).status).toBe("EXCLUIDO");
+      // orfao na lixeira (nao apagado) e restauravel pelo mesmo comando
       expect(await cliStorage.open(orphan)).toBeNull();
-      const second = run();
+      expect(await fs.stat(path.join(dir, ".trash", orphan)).then((st) => st.isFile(), () => false)).toBe(true);
+
+      const second = cli(dir, ["--ambiente", "test", "--horas", "1"]);
       expect(second.status, second.stderr).toBe(0);
-      expect(JSON.parse(second.stdout.trim().split(NL).pop()!)).toMatchObject({ pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsRemoved: 0, tempRemoved: 0 });
+      expect(lastJson(second.stdout)).toMatchObject({ pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsTrashed: 0, trashPurged: 0, tempRemoved: 0 });
+
+      const restored = cli(dir, ["--ambiente", "test", "--restaurar", orphan]);
+      expect(restored.status, restored.stderr).toBe(0);
+      expect(lastJson(restored.stdout)).toMatchObject({ ok: true, restaurado: true });
+      expect(await cliStorage.open(orphan)).not.toBeNull();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 90_000);
+
+  it("recusa --horas 0, ambiente ausente e --ambiente que nao combina com o banco do destino (e nao toca em nada)", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nexo-storage-cli-"));
+    try {
+      const testUrl = process.env.TEST_DATABASE_URL!;
+      const refused = (args: string[], env: Record<string, string> = {}) => {
+        const r = cli(dir, args, env);
+        expect(r.status, `${args.join(" ")}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stdout).toBe("");
+        expect(r.stderr).not.toMatch(/postgresql:|password/i);
+        return r.stderr;
+      };
+      refused(["--ambiente", "test", "--horas", "0"]);
+      refused(["--ambiente", "test", "--horas", "0.5"]);
+      refused(["--ambiente", "test", "--horas", "-3"]);
+      refused(["--horas", "24"]); // sem --ambiente: nao existe mais padrao silencioso
+      refused(["--ambiente", "staging"]);
+      refused(["--ambiente", "test", "--retencao-dias", "0"]);
+      // --ambiente e conferido contra o banco de verdade: o rotulo sozinho nao autoriza nada
+      expect(refused(["--ambiente", "dev"], { DATABASE_URL: testUrl })).toMatch(/nexo_dev/);
+      expect(refused(["--ambiente", "producao"], { DATABASE_URL: testUrl })).toMatch(/producao/);
+      expect(refused(["--ambiente", "test"], { TEST_DATABASE_URL: "postgresql://nexo_app:x@db.exemplo.invalid:5432/nexo_prod" })).toMatch(/nexo_test/);
+      expect(refused(["--ambiente", "producao"], { DATABASE_URL: "postgresql://nexo_app:x@db.exemplo.invalid:5432/nexo_prod", PROVISIONAR_HOST_PERMITIDO: "" })).toMatch(/PROVISIONAR_HOST_PERMITIDO/);
+      expect(refused(["--ambiente", "producao"], { DATABASE_URL: "postgresql://nexo_app:x@db.exemplo.invalid:5432/nexo_prod", PROVISIONAR_HOST_PERMITIDO: "outro.exemplo.invalid" })).toMatch(/nao esta em/);
+      expect(await createLocalStorage(dir).readInstallId()).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
 });

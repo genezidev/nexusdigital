@@ -6,7 +6,11 @@ import { getServerEnv } from "@/server/config/env";
  */
 export function verifyServerConfigOrExit(): void {
   try {
-    getServerEnv();
+    const env = getServerEnv();
+    // So chega aqui em producao com http se for teste local explicito (ALLOW_INSECURE_LOCAL_APP_URL, host de loopback).
+    if (env.NODE_ENV === "production" && env.APP_URL.startsWith("http://")) {
+      console.warn("[nexo] AVISO: APP_URL em http (cookie sem Secure): so aceitavel em teste local, nunca num servidor real.");
+    }
   } catch (error) {
     console.error(`[nexo] ${error instanceof Error ? error.message : "configuracao invalida"}`);
     process.exit(1);

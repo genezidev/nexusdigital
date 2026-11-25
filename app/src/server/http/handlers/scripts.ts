@@ -6,7 +6,7 @@ import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { DEFAULT_RECORDING_DOMAINS } from "@/server/domain/external-link";
 import type { Authorized } from "@/server/http/api";
-import { parseQuery, uuid } from "@/server/http/api";
+import { limitMutation, parseQuery, uuid } from "@/server/http/api";
 import { commentRow } from "@/server/http/handlers/content";
 import { linkedAssetAgencyOut, linkedAssetPortalOut, page, recordingOut, scriptAgencyOut, scriptPortalOut } from "@/server/http/dto-fase2";
 import { parseBody } from "@/server/http/handler";
@@ -62,6 +62,7 @@ export async function postScriptStatus(a: Authorized, req: NextRequest, scriptId
 }
 
 export async function postScriptComment(a: Authorized, req: NextRequest, scriptId: string, requestId: string) {
+  await limitMutation("comment", a.ctx.userId);
   const b = await parseBody(req, commentBody);
   const r = await addComment(getDb(), a.ctx, {
     scriptId: uuid(scriptId),
@@ -72,6 +73,7 @@ export async function postScriptComment(a: Authorized, req: NextRequest, scriptI
 }
 
 export async function postRecording(a: Authorized, req: NextRequest, scriptId: string, requestId: string) {
+  await limitMutation("recording", a.ctx.userId);
   const b = await parseBody(req, recordingBody);
   const env = getServerEnv();
   const r = await submitRecording(getDb(), a.ctx, {

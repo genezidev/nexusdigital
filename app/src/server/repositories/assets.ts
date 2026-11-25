@@ -1,7 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { AssetCategory, AssetLinkRole, AssetStatus, Visibility } from "@/generated/prisma/enums";
 import { assertCan, isAgency } from "@/server/authorization/permissions";
-import type { Scoped } from "@/server/db/scope";
+import type { Scoped, SystemScoped } from "@/server/db/scope";
 
 // Arquivos privados. O cliente ve o que ele mesmo enviou e o que esta ligado a um destino que ele ve.
 // storage_key nunca sai daqui para o cliente: o download passa por URL assinada gerada depois da autorizacao.
@@ -39,7 +39,7 @@ export async function getAsset(s: Scoped, id: string) {
 export async function getStorageKeyForDownload(s: Scoped, id: string) {
   const asset = await getAsset(s, id);
   if (!asset || asset.status !== "DISPONIVEL") return null;
-  const row = await s.tx.asset.findFirst({ where: { id, clientId: s.ctx.clientId }, select: { storageKey: true, mimeType: true, originalName: true } });
+  const row = await s.tx.asset.findFirst({ where: { id, clientId: s.ctx.clientId }, select: { storageKey: true, mimeType: true, originalName: true, scanStatus: true } });
   return row;
 }
 
@@ -66,14 +66,35 @@ export async function countPendingUploads(s: Scoped, since: Date): Promise<numbe
   return s.tx.asset.count({ where: { clientId: s.ctx.clientId, uploadedById: s.ctx.userId, status: "PENDENTE", createdAt: { gte: since } } });
 }
 
-/** Bytes ocupados pelo cliente: arquivos DISPONIVEIS (medidos) mais pendentes recentes (declarados). */
-export async function clientStorageBytes(s: Scoped, pendingSince: Date): Promise<bigint> {
+/**
+ * Trava consultiva por CLIENTE para tudo que decide pendentes e cota (pedido de envio e finalizacao do envio): sem ela,
+ * pedidos paralelos leem o mesmo "ainda cabe" e passam do limite (contar e depois inserir). Vale ate o fim da transacao.
+ */
+export async function lockClientUploads(s: Scoped): Promise<void> {
   assertCan(s.ctx, "asset:upload");
-  const agg = await s.tx.asset.aggregate({
-    where: { clientId: s.ctx.clientId, OR: [{ status: "DISPONIVEL" }, { status: "PENDENTE", createdAt: { gte: pendingSince } }] },
-    _sum: { bytes: true },
-  });
-  return agg._sum.bytes ?? BigInt(0);
+  await s.tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`upload-quota:${s.ctx.clientId}`}, 0))`;
+}
+
+/**
+ * Bytes ocupados pelo CLIENTE INTEIRO: arquivos DISPONIVEIS (medidos) mais pendentes recentes (declarados), de todas as
+ * pessoas e inclusive os INTERNOS da agencia. Vem de `client_storage_bytes` (SECURITY DEFINER, so devolve um numero):
+ * somar pela sessao do cliente contaria so o que a RLS deixa ele ver, e cada colaborador teria uma cota propria.
+ * `excludeAssetId` tira da conta o proprio envio que esta sendo finalizado (ele ainda conta como pendente declarado).
+ */
+export async function clientStorageBytes(s: Scoped, pendingSince: Date, excludeAssetId?: string): Promise<bigint> {
+  assertCan(s.ctx, "asset:upload");
+  const rows = await s.tx.$queryRaw<{ total: bigint }[]>`
+    SELECT client_storage_bytes(${s.ctx.clientId}::uuid, ${pendingSince}::timestamptz, ${excludeAssetId ?? null}::uuid) AS total`;
+  return BigInt(rows[0]?.total ?? 0);
+}
+
+/**
+ * Bytes ocupados por TODOS os clientes (so um numero; escopo de capacidade). Teto global de armazenamento. Vem de
+ * `storage_bytes_total` (SECURITY DEFINER, so em escopo de sistema): somar pela RLS custa por linha e crescia a cada envio.
+ */
+export async function globalStorageBytes(s: SystemScoped, pendingSince: Date, excludeAssetId?: string): Promise<bigint> {
+  const rows = await s.tx.$queryRaw<{ total: bigint }[]>`SELECT storage_bytes_total(${pendingSince}::timestamptz, ${excludeAssetId ?? null}::uuid) AS total`;
+  return BigInt(rows[0]?.total ?? 0);
 }
 
 export async function rejectPendingAsset(s: Scoped, id: string) {

@@ -46,6 +46,14 @@ const armazenamento = {
   UPLOAD_RATE_MAX: process.env.UPLOAD_RATE_MAX ?? "1000",
   DOWNLOAD_RATE_MAX: process.env.DOWNLOAD_RATE_MAX ?? "1000",
   MAX_PENDING_UPLOADS_PER_USER: process.env.MAX_PENDING_UPLOADS_PER_USER ?? "200",
+  // Espaco livre minimo pequeno: o teste nao deve depender do disco da maquina (o padrao real e 2 GB).
+  STORAGE_MIN_FREE_MB: process.env.STORAGE_MIN_FREE_MB ?? "64",
+  // Limites por pessoa das demais mutacoes (B-5): folgados aqui; a instancia de limites baixos (global-setup) os reduz.
+  UPLOAD_PUT_RATE_MAX: process.env.UPLOAD_PUT_RATE_MAX ?? "1000",
+  DECISION_RATE_MAX: process.env.DECISION_RATE_MAX ?? "1000",
+  COMMENT_RATE_MAX: process.env.COMMENT_RATE_MAX ?? "1000",
+  RECORDING_RATE_MAX: process.env.RECORDING_RATE_MAX ?? "1000",
+  CONTENT_CREATE_RATE_MAX: process.env.CONTENT_CREATE_RATE_MAX ?? "1000",
 };
 
 const next = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
@@ -56,6 +64,8 @@ const filho = spawn(process.execPath, [next, "start", "-p", porta, "-H", "127.0.
     NODE_ENV: "production",
     DATABASE_URL: url,
     APP_URL: `http://127.0.0.1:${porta}`,
+    // Producao exige APP_URL https (B-8); so teste local em loopback usa http, e so com este aviso explicito.
+    ALLOW_INSECURE_LOCAL_APP_URL: "true",
     // Os testes enviam x-real-ip proprio (o proxy real o sobrescreve) para isolar o limite por teste.
     // NEXO_TEST_* permite subir variantes (sem proxy confiavel, com TRUSTED_PROXIES e outro cabecalho).
     TRUST_PROXY: process.env.NEXO_TEST_TRUST_PROXY ?? "true",

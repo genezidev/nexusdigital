@@ -5,7 +5,7 @@ import { isAgency } from "@/server/authorization/permissions";
 import { getDb } from "@/server/db/client";
 import { parseBody } from "@/server/http/handler";
 import type { Authorized } from "@/server/http/api";
-import { parseQuery, uuid } from "@/server/http/api";
+import { limitMutation, parseQuery, uuid } from "@/server/http/api";
 import {
   approvalOut,
   calendarItemOut,
@@ -65,6 +65,7 @@ export async function getContentDetailResponse(a: Authorized, contentId: string,
 }
 
 export async function createContentResponse(a: Authorized, req: NextRequest, requestId: string) {
+  await limitMutation("content-create", a.ctx.userId);
   const b = await parseBody(req, contentBody);
   const row = await createContent(getDb(), a.ctx, { ...b, plannedOn: toDay(b.plannedOn) });
   return json(contentOut(a, row), 201, requestId);
@@ -127,6 +128,7 @@ export async function listCommentsResponse(a: Authorized, contentId: string, req
 }
 
 export async function postComment(a: Authorized, req: NextRequest, contentId: string, requestId: string) {
+  await limitMutation("comment", a.ctx.userId);
   const b = await parseBody(req, commentBody);
   const agency = isAgency(a.ctx);
   const r = await addComment(getDb(), a.ctx, {
@@ -141,6 +143,7 @@ export async function postComment(a: Authorized, req: NextRequest, contentId: st
 
 /** Decisao do cliente sobre UMA versao. Autor e horario vem da sessao e do banco, nunca do corpo. */
 export async function postDecision(a: Authorized, req: NextRequest, contentId: string, versionId: string, requestId: string) {
+  await limitMutation("decision", a.ctx.userId);
   const b = await parseBody(req, decisionBody);
   const r = await decideApproval(getDb(), a.ctx, { contentId: uuid(contentId), versionId: uuid(versionId), decision: b.decision, comment: b.comment });
   // `overRevisionLimit` e sinal para a agencia combinar com o cliente: nunca volta ao portal.

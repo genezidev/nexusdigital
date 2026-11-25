@@ -9,12 +9,31 @@ const csv = (value: string | undefined) =>
     .map((v) => v.trim())
     .filter(Boolean);
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Producao so aceita https; http so para teste local explicito (host de loopback + ALLOW_INSECURE_LOCAL_APP_URL=true). */
+export function isAcceptableProductionAppUrl(appUrl: string, allowInsecureLocal: boolean): boolean {
+  let u: URL;
+  try {
+    u = new URL(appUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol === "https:") return true;
+  return u.protocol === "http:" && allowInsecureLocal && LOOPBACK_HOSTS.has(u.hostname);
+}
+
 const schema = z
   .object({
     NODE_ENV: z.string().optional(),
     DATABASE_URL: z.string().min(1),
     BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET precisa ter 32+ caracteres"),
-    APP_URL: z.string().url().default("http://localhost:3000"),
+    // Origem publica do app. Fora de producao o padrao e http://localhost:3000. Em PRODUCAO e obrigatoria e https
+    // (B-8: cookie Secure, origem confiavel e links de convite dependem dela); ver ALLOW_INSECURE_LOCAL_APP_URL.
+    APP_URL: z.string().url().optional(),
+    // Escape so para teste automatizado em maquina local: aceita http em producao SE o host for localhost/127.0.0.1/[::1].
+    // Num servidor real (dominio de verdade) a variavel nao tem efeito e a partida continua recusada.
+    ALLOW_INSECURE_LOCAL_APP_URL: z.enum(["true", "false"]).optional(),
     // Em producao a escolha e OBRIGATORIA e explicita (ausente = o app nao inicia). true so atras de proxy
     // reverso confiavel que sobrescreve TRUSTED_IP_HEADER; false = nenhum cabecalho de IP vale (docs/proxy-e-ip.md).
     TRUST_PROXY: z.enum(["true", "false"]).optional(),
@@ -57,7 +76,23 @@ const schema = z
     // Quantos envios pendentes cada pessoa pode ter ao mesmo tempo.
     MAX_PENDING_UPLOADS_PER_USER: z.coerce.number().int().min(1).max(1000).default(10),
     // Cota de armazenamento por cliente em MB (DISPONIVEL + pendentes declarados). 0 desliga a conferencia.
-    STORAGE_CLIENT_QUOTA_MB: z.coerce.number().min(0).max(10_000_000).default(51200),
+    // Padrao 10 GB: dimensione pelo volume e pelo numero de clientes (docs/armazenamento.md).
+    STORAGE_CLIENT_QUOTA_MB: z.coerce.number().min(0).max(10_000_000).default(10240),
+    // Teto GLOBAL (soma de todos os clientes) em MB; 0 desliga. Padrao 100 GB: ajuste ao tamanho do volume dedicado.
+    STORAGE_GLOBAL_QUOTA_MB: z.coerce.number().min(0).max(100_000_000).default(102400),
+    // Espaco livre minimo que o volume precisa manter DEPOIS de aceitar o arquivo, em MB; 0 desliga. Padrao 2 GB.
+    STORAGE_MIN_FREE_MB: z.coerce.number().min(0).max(100_000_000).default(2048),
+    // Lixeira da limpeza (M-A): orfao vai para `.trash/` e so e apagado depois destes dias.
+    STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    // Limpeza aborta (nada e movido) se achar mais orfaos que isto, ou mais que esta proporcao dos objetos da pasta.
+    CLEANUP_MAX_ORPHANS: z.coerce.number().int().min(0).max(1_000_000).default(20),
+    CLEANUP_MAX_ORPHAN_RATIO: z.coerce.number().min(0).max(1).default(0.1),
+    // Limites por PESSOA (janela de 10 min) das demais mutacoes (B-5). Cada um e configuravel.
+    UPLOAD_PUT_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(120),
+    DECISION_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(60),
+    COMMENT_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(60),
+    RECORDING_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(20),
+    CONTENT_CREATE_RATE_MAX: z.coerce.number().int().min(1).max(100000).default(120),
     // Dominios autorizados para link de gravacao (CSV). Vazio = lista padrao do codigo (domain/external-link.ts).
     RECORDING_LINK_DOMAINS: z.string().max(2000).optional(),
   })
@@ -68,9 +103,17 @@ const schema = z
     if (value.NODE_ENV === "production" && !value.STORAGE_SIGNING_SECRET) {
       ctx.addIssue({ code: "custom", path: ["STORAGE_SIGNING_SECRET"], message: "STORAGE_SIGNING_SECRET precisa ser definido em producao" });
     }
+    if (value.NODE_ENV === "production") {
+      if (!value.APP_URL) {
+        ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "APP_URL precisa ser definido em producao (https)" });
+      } else if (!isAcceptableProductionAppUrl(value.APP_URL, value.ALLOW_INSECURE_LOCAL_APP_URL === "true")) {
+        ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "APP_URL precisa ser https em producao" });
+      }
+    }
   })
   .transform((value) => ({
     ...value,
+    APP_URL: value.APP_URL ?? "http://localhost:3000",
     TRUST_PROXY: value.TRUST_PROXY ?? "false",
     TRUSTED_PROXIES: csv(value.TRUSTED_PROXIES),
     RECORDING_LINK_DOMAINS: csv(value.RECORDING_LINK_DOMAINS).map((d) => d.toLowerCase()),

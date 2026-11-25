@@ -40,6 +40,10 @@ export function verifyToken(secret: Buffer, token: string, expectedPurpose: Toke
   const parts = token.split(".");
   if (parts.length !== 2 || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1])) return { ok: false, reason: "MALFORMED" };
   const given = Buffer.from(parts[1], "base64url");
+  // So a forma canonica vale: o ultimo caractere de um base64url de 32 bytes carrega 2 bits sem uso, e trocar so esse
+  // caractere (por exemplo A por B) decodifica para os MESMOS bytes. Nao e falsificacao (o MAC e o mesmo), mas um
+  // token adulterado nao pode ser aceito: isso explicava o teste de "token adulterado" que falhava de vez em quando.
+  if (b64(given) !== parts[1]) return { ok: false, reason: "BAD_SIGNATURE" };
   const expected = mac(secret, parts[0]);
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return { ok: false, reason: "BAD_SIGNATURE" };
   try {

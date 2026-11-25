@@ -41,6 +41,13 @@ export function assertSafeStorageRoot(root: string, appDir: string = process.cwd
 export function createLocalStorage(rootDir: string, appDir: string = process.cwd()): ObjectStorage {
   const root = assertSafeStorageRoot(rootDir, appDir);
   const tmpDir = path.join(root, ".tmp");
+  const trashDir = path.join(root, ".trash");
+  const installIdPath = path.join(root, ".install-id");
+  const trashPath = (key: string) => {
+    const m = OBJECT_KEY.exec(key);
+    if (!m) throw new Error("chave de objeto invalida");
+    return path.join(trashDir, "clients", m[1], m[2]);
+  };
 
   function objectPath(key: string): string {
     const m = OBJECT_KEY.exec(key);
@@ -148,7 +155,7 @@ export function createLocalStorage(rootDir: string, appDir: string = process.cwd
     },
 
     async *list(opts): AsyncIterable<ListedObject> {
-      const cutoff = (opts.now ?? new Date()).getTime() - opts.olderThanMs;
+      const cutoff = opts.olderThanMs <= 0 ? Number.POSITIVE_INFINITY : (opts.now ?? new Date()).getTime() - opts.olderThanMs;
       const readdir = (dir: string) => fs.readdir(dir, { withFileTypes: true }).catch((e) => (errCode(e) === "ENOENT" ? [] : toUnavailable("listar", e)));
       for (const t of await readdir(tmpDir)) {
         const key = `.tmp/${t.name}`;
@@ -164,6 +171,87 @@ export function createLocalStorage(rootDir: string, appDir: string = process.cwd
           const st = await fs.stat(path.join(root, "clients", c.name, f.name)).catch(() => null);
           if (st && st.mtimeMs < cutoff) yield { key, modifiedAt: st.mtime };
         }
+      }
+    },
+
+    async readInstallId(): Promise<string | null> {
+      try {
+        const text = (await fs.readFile(installIdPath, "utf8")).trim();
+        return text.length > 0 && text.length <= 200 ? text : null;
+      } catch (e) {
+        if (errCode(e) === "ENOENT") return null;
+        toUnavailable("ler identificador da instalacao", e);
+      }
+    },
+
+    async writeInstallId(id): Promise<void> {
+      if (!/^[A-Za-z0-9-]{8,200}$/.test(id)) throw new Error("identificador de instalacao invalido");
+      try {
+        await ensureDir(root);
+        await fs.writeFile(installIdPath, id + "\n", { flag: "wx", mode: 0o600 });
+      } catch (e) {
+        if (errCode(e) === "EEXIST") throw new ConflictError("INSTALL_ID_EXISTS", "A pasta de armazenamento ja tem um identificador de instalacao.");
+        toUnavailable("gravar identificador da instalacao", e);
+      }
+    },
+
+    async moveToTrash(key, now): Promise<boolean> {
+      const src = objectPath(key);
+      const dest = trashPath(key);
+      try {
+        if (!(await fs.stat(src).then((st) => st.isFile(), () => false))) return false;
+        await ensureDir(path.dirname(dest));
+        await fs.rm(dest, { force: true });
+        await fs.rename(src, dest);
+        await fs.utimes(dest, now, now);
+        return true;
+      } catch (e) {
+        toUnavailable("mover para a lixeira", e);
+      }
+    },
+
+    async restoreFromTrash(key): Promise<boolean> {
+      const src = trashPath(key);
+      const dest = objectPath(key);
+      if (!(await fs.stat(src).then((st) => st.isFile(), () => false))) return false;
+      if (await fs.stat(dest).then(() => true, () => false)) throw new ConflictError("OBJECT_EXISTS", "Ja existe um arquivo gravado nesta chave.");
+      try {
+        await ensureDir(path.dirname(dest));
+        await fs.rename(src, dest);
+        return true;
+      } catch (e) {
+        toUnavailable("restaurar da lixeira", e);
+      }
+    },
+
+    async *listTrash(): AsyncIterable<{ key: string; trashedAt: Date }> {
+      const readdir = (dir: string) => fs.readdir(dir, { withFileTypes: true }).catch((e) => (errCode(e) === "ENOENT" ? [] : toUnavailable("listar lixeira", e)));
+      for (const c of await readdir(path.join(trashDir, "clients"))) {
+        if (!c.isDirectory()) continue;
+        for (const f of await readdir(path.join(trashDir, "clients", c.name))) {
+          const key = `clients/${c.name}/${f.name}`;
+          if (!f.isFile() || !OBJECT_KEY.test(key)) continue;
+          const st = await fs.stat(path.join(trashDir, "clients", c.name, f.name)).catch(() => null);
+          if (st) yield { key, trashedAt: st.mtime };
+        }
+      }
+    },
+
+    async deleteFromTrash(key): Promise<void> {
+      try {
+        await fs.rm(trashPath(key), { force: true });
+      } catch (e) {
+        toUnavailable("apagar da lixeira", e);
+      }
+    },
+
+    async freeBytes(): Promise<number> {
+      try {
+        await ensureDir(root);
+        const st = await fs.statfs(root);
+        return Number(st.bavail) * Number(st.bsize);
+      } catch (e) {
+        toUnavailable("medir espaco livre", e);
       }
     },
   };

@@ -108,3 +108,18 @@ export class StorageUnavailableError extends AppError {
     super("STORAGE_UNAVAILABLE", 503, message);
   }
 }
+
+// Capacidade do SERVIDOR (teto global de armazenamento ou pouco espaco livre no volume): 507, mensagem clara e sem
+// numero interno. Diferente da cota do cliente (422, STORAGE_QUOTA_EXCEEDED), que e regra de negocio por cliente.
+export class InsufficientStorageError extends AppError {
+  constructor(message = "O armazenamento do servidor esta sem espaco no momento. Tente novamente mais tarde ou avise a agencia.") {
+    super("STORAGE_FULL", 507, message);
+  }
+}
+
+// Arquivo marcado em QUARENTENA (scan_status): nao se baixa ate a agencia liberar. 423 e codigo proprio, sem detalhe.
+export class AssetQuarantinedError extends AppError {
+  constructor(message = "Este arquivo esta em quarentena e nao pode ser baixado.") {
+    super("ASSET_QUARANTINED", 423, message);
+  }
+}

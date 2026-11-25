@@ -161,7 +161,7 @@ describe("fase 2, visibilidade ao cliente na RLS (consultas cruas na conexao do 
 
   it("o cliente so muda o STATUS de um conteudo que aguarda aprovacao; qualquer outro campo e recusado pelo banco", async () => {
     await expect(withTenant(appDb, owner, ({ tx }) => tx.$executeRawUnsafe(`UPDATE contents SET title = 'sequestrado' WHERE id = '${a.contentShared}'`))).rejects.toThrow(/so decide o status/i);
-    await expect(withTenant(appDb, owner, ({ tx }) => tx.$executeRawUnsafe(`UPDATE contents SET status = 'PUBLICADO' WHERE id = '${a.contentShared}'`))).rejects.toThrow(/row-level security|violates/i);
+    await expect(withTenant(appDb, owner, ({ tx }) => tx.$executeRawUnsafe(`UPDATE contents SET status = 'PUBLICADO' WHERE id = '${a.contentShared}'`))).rejects.toThrow(/row-level security|violates|decis/i); // B-1: agora o gatilho de decisao recusa antes da RLS
     expect((await ownerDb.content.findUniqueOrThrow({ where: { id: a.contentShared } })).status).toBe("AGUARDANDO_APROVACAO");
   });
 

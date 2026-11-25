@@ -23,7 +23,7 @@ const keysLike = async (pattern: string) => ownerDb.rateLimit.findMany({ where: 
 describe("inicializacao em producao exige TRUST_PROXY explicito", () => {
   const root = path.resolve(__dirname, "../..");
   function start(extra: Record<string, string | undefined>) {
-    const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production", DATABASE_URL: process.env.TEST_DATABASE_URL, APP_URL: "http://127.0.0.1:3199", ...extra };
+    const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "production", DATABASE_URL: process.env.TEST_DATABASE_URL, APP_URL: "http://127.0.0.1:3199", ALLOW_INSECURE_LOCAL_APP_URL: "true", ...extra };
     for (const k of Object.keys(env)) if (k === "TEST" || k.startsWith("VITEST")) delete env[k];
     if (extra.TRUST_PROXY === undefined) delete env.TRUST_PROXY;
     const child = spawn(process.execPath, [path.join(root, "node_modules/next/dist/bin/next"), "start", "-p", "3199", "-H", "127.0.0.1"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });

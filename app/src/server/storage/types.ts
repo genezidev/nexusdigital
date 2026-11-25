@@ -36,6 +36,22 @@ export interface ObjectStorage {
   open(key: string): Promise<OpenedObject | null>;
   /** Idempotente: objeto ja ausente nao e erro. */
   delete(key: string): Promise<void>;
-  /** Objetos e temporarios mais velhos que `olderThanMs` (limpeza de orfaos). */
+  /** Objetos e temporarios mais velhos que `olderThanMs` (limpeza de orfaos). `olderThanMs: 0` lista tudo. */
   list(opts: { olderThanMs: number; now?: Date }): AsyncIterable<ListedObject>;
+
+  // ---- Instalacao e lixeira (M-A). Limpeza nunca apaga de primeira: orfao vai para a lixeira e so sai depois da retencao. ----
+  /** Identificador da instalacao gravado na RAIZ do armazenamento (`.install-id`); null se ainda nao existe. */
+  readInstallId(): Promise<string | null>;
+  /** Cria o identificador. NUNCA sobrescreve: ConflictError se ja existe. */
+  writeInstallId(id: string): Promise<void>;
+  /** Move o objeto para a lixeira (dentro da raiz) e marca `now` como a hora da remocao. false se o objeto nao existe. */
+  moveToTrash(key: string, now: Date): Promise<boolean>;
+  /** Devolve da lixeira para a chave original. false se nao esta na lixeira; ConflictError se a chave ja existe. */
+  restoreFromTrash(key: string): Promise<boolean>;
+  /** Objetos na lixeira, com a hora em que entraram. */
+  listTrash(): AsyncIterable<{ key: string; trashedAt: Date }>;
+  /** Apaga DE VERDADE um objeto da lixeira (idempotente). */
+  deleteFromTrash(key: string): Promise<void>;
+  /** Bytes livres para o app no volume do armazenamento (StorageUnavailableError se nao der para medir). */
+  freeBytes(): Promise<number>;
 }

@@ -66,4 +66,15 @@ Falha comum: `42501` ao gravar a auditoria significa que o papel dono não ignor
 
 ## Arquivos privados (fase 2)
 
-Antes do primeiro envio em produção: definir `STORAGE_LOCAL_DIR` (caminho absoluto FORA da pasta do app, só o usuário do app escreve), `STORAGE_SIGNING_SECRET` (32+ caracteres, só no servidor; o app não inicia em produção sem ele), os limites `MAX_IMAGE_MB`, `MAX_PDF_MB`, `MAX_VIDEO_MB`, incluir a pasta no backup junto com o banco e agendar `node scripts/limpar-arquivos.mjs --ambiente producao` (uma vez por hora). Proxy reverso: sem limite de corpo abaixo do vídeo máximo e sem bufferizar o corpo de `/api/files/upload/`. Tudo em `docs/armazenamento.md`; nada disso foi executado em produção.
+Antes do primeiro envio em produção:
+
+1. **`APP_URL` em https** (obrigatória: o app não inicia em produção sem ela, nem com `http://...`; a mensagem cita só o nome da variável). Vale também para o cookie `Secure` e para a origem confiável (CSRF).
+2. **Volume dedicado** para `STORAGE_LOCAL_DIR` (caminho absoluto FORA da pasta do app, montado à parte do banco e dos logs; só o usuário do app escreve). **Alerta de disco** da VPS em 80% e 90% do volume (o 507 do app é o último recurso).
+3. `STORAGE_SIGNING_SECRET` (32+ caracteres, só no servidor; o app não inicia em produção sem ele) e os limites `MAX_IMAGE_MB`, `MAX_PDF_MB`, `MAX_VIDEO_MB`.
+4. **Dimensionar a capacidade** pelo volume real: `STORAGE_CLIENT_QUOTA_MB` (padrão 10240), `STORAGE_GLOBAL_QUOTA_MB` (padrão 102400; deve ficar abaixo do volume menos o livre mínimo) e `STORAGE_MIN_FREE_MB` (padrão 2048). Os padrões são ponto de partida, não medida da VPS.
+5. Incluir a pasta (com `.trash/` e `.install-id`) no backup junto com o banco.
+6. **Vincular a instalação uma única vez**, depois do primeiro `migrate deploy` e de conferir que o banco e a pasta são o par certo: `node scripts/limpar-arquivos.mjs --ambiente producao --vincular-instalacao` (cria `.install-id` na pasta, copiando o `installation_id` do banco; nunca sobrescreve). Sem isso a limpeza se recusa a rodar (código 3).
+7. Agendar `node scripts/limpar-arquivos.mjs --ambiente producao` (uma vez por hora). O `--ambiente producao` só roda com o host do banco em `PROVISIONAR_HOST_PERMITIDO` e com banco que não seja `nexo_dev`/`nexo_test`. Órfãos vão para `.trash/` e ficam 30 dias (`STORAGE_TRASH_RETENTION_DAYS`); a limpeza aborta (código 3) se achar órfãos demais: **trate código 3 como alerta** (banco errado ou backup antigo?), não como ruído. Restaurar: `--restaurar clients/<cliente>/<uuid>`.
+8. Proxy reverso: sem limite de corpo abaixo do vídeo máximo e sem bufferizar o corpo de `/api/files/upload/`.
+
+A migration `20261125140000_endurecimento_revisao_fase2` cria o `installation_id` (tabela `app_settings`), as funções `client_storage_bytes` e `storage_bytes_total` (`SECURITY DEFINER`, mesma dependência de `cycle_progress_counts`: o dono do banco ignora RLS) e os gatilhos que barram o papel do app em decisão, membros e convites. Em produção ela segue o fluxo normal (backup, `migrate deploy`); a reversão em desenvolvimento e teste é `app/prisma/rollback/20261125140000_endurecimento_revisao_fase2.down.sql`. Tudo em `docs/armazenamento.md`; nada disso foi executado em produção.

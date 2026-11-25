@@ -2,6 +2,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { resolveTenantContext, type TenantContext } from "@/server/authorization/context";
+import { getServerEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { NotFoundError, TooManyRequestsError, ValidationError } from "@/server/errors";
 import { requireClientUser, requireStaffArea, type SessionActor } from "@/server/http/actor";
@@ -54,6 +55,25 @@ export function parseQuery<S extends z.ZodType>(req: Request, schema: S): z.outp
 export async function limitByUser(name: string, userId: string, rule: { windowSeconds: number; max: number }): Promise<void> {
   const result = await consumeRateLimit(getDb(), `app:${name}:user:${userId}`, rule.windowSeconds, rule.max);
   if (!result.allowed) throw new TooManyRequestsError(result.retryAfterSeconds);
+}
+
+/**
+ * Mutacoes que um cliente (ou agencia) poderia repetir sem parar para encher o banco ou a auditoria append-only
+ * (B-5). Um limite por PESSOA e por tipo, janela de 10 min, valores em variaveis de ambiente. O balde de cada tipo e
+ * proprio (`app:mut-<tipo>:user:<id>`), entao nenhum afrouxa o limite de outro nem o do login.
+ */
+export type MutationLimit = "decision" | "comment" | "recording" | "content-create" | "upload-put";
+
+export async function limitMutation(kind: MutationLimit, userId: string): Promise<void> {
+  const env = getServerEnv();
+  const max = {
+    decision: env.DECISION_RATE_MAX,
+    comment: env.COMMENT_RATE_MAX,
+    recording: env.RECORDING_RATE_MAX,
+    "content-create": env.CONTENT_CREATE_RATE_MAX,
+    "upload-put": env.UPLOAD_PUT_RATE_MAX,
+  }[kind];
+  await limitByUser(`mut-${kind}`, userId, { windowSeconds: 600, max });
 }
 
 // ---------- esquemas de consulta comuns ----------

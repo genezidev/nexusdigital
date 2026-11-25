@@ -54,6 +54,9 @@ export async function editScript(db: Db, ctx: TenantContext, scriptId: string, p
     await assertAssignable(s, patch.assigneeId);
     await updateScript(s, scriptId, patch);
     if (scenes) await replaceScenes(s, scriptId, scenes);
+    // Auditoria (B-6): quem editou e O QUE mudou (so nomes de campo e quantidade de cenas, nunca o texto do roteiro).
+    const fields = Object.entries(patch).filter(([, v]) => v !== undefined).map(([k]) => k).sort();
+    await recordAudit(s, { action: "script.updated", entityType: "script", entityId: scriptId, diff: { fields, ...(scenes ? { scenes: scenes.length } : {}) } });
   });
 }
 

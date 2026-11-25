@@ -9,7 +9,7 @@ import { attachmentDisposition } from "@/server/domain/content-disposition";
 import { NotFoundError, UnsupportedMediaTypeError } from "@/server/errors";
 import { requireActor } from "@/server/http/actor";
 import type { Authorized } from "@/server/http/api";
-import { limitByUser, parseQuery, uuid } from "@/server/http/api";
+import { limitByUser, limitMutation, parseQuery, uuid } from "@/server/http/api";
 import { assetAgencyOut, assetPortalOut, page } from "@/server/http/dto-fase2";
 import { parseBody } from "@/server/http/handler";
 import { json } from "@/server/http/respond";
@@ -97,6 +97,7 @@ export async function putLinkPosition(a: Authorized, req: NextRequest, linkId: s
 /** PUT: o corpo sao os bytes (octet-stream), lidos em streaming. Content-Type nunca decide o tipo do arquivo. */
 export async function putUploadBytes(req: NextRequest, token: string, requestId: string) {
   const actor = await requireActor(req.headers);
+  await limitMutation("upload-put", actor.userId);
   const type = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   if (type !== "" && type !== "application/octet-stream") {
     await req.body?.cancel().catch(() => undefined);

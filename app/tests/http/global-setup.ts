@@ -34,6 +34,19 @@ export default async function setup() {
         DOWNLOAD_URL_TTL_SECONDS: "5",
       },
     },
+    // Limites BAIXOS por pessoa das demais mutacoes (B-5): decisao 2, comentario 3, gravacao 2, criacao de conteudo 3 e
+    // envio dos bytes 2, por janela de 10 min. Os outros apps os deixam folgados.
+    {
+      port: HTTP_PORT + 4,
+      env: {
+        AUTH_SIGNIN_RATE_MAX: "1000",
+        DECISION_RATE_MAX: "2",
+        COMMENT_RATE_MAX: "3",
+        RECORDING_RATE_MAX: "2",
+        CONTENT_CREATE_RATE_MAX: "3",
+        UPLOAD_PUT_RATE_MAX: "2",
+      },
+    },
   ];
   const children: ChildProcess[] = [];
   let exited = false;

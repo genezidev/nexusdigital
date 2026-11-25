@@ -67,6 +67,9 @@ async function writeAndSend(title: string, caption: string, withFile: boolean) {
   if (withFile) {
     await chooseFile(admin, "Arquivo da versão", { name: "previa.png", mimeType: "image/png", buffer: png() });
     await admin.getByRole("button", { name: "Enviar e anexar à versão" }).click();
+    // Espera o fim do envio E do anexo (o aviso so aparece depois de `attachAsset`); sem isso, a versao podia ser enviada
+    // para aprovacao antes de o anexo existir e o banco recusa vinculo em versao enviada.
+    await expect(admin.getByText("Arquivo enviado.")).toBeVisible();
     await expect(admin.getByText("previa.png").first()).toBeVisible();
   }
   await admin.getByRole("button", { name: "Compartilhar com o cliente" }).click();

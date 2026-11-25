@@ -706,3 +706,14 @@ model AssetLink {
   @@index([clientId, contentId])
   @@map("asset_links")
 }
+
+// Configuracao da instalacao (migration 20261125140000). Hoje so guarda `installation_id`, o identificador
+// aleatorio que a limpeza de arquivos confere contra `.install-id` da pasta de armazenamento (M-A).
+// O papel do app so le e cria, e so em escopo de sistema (RLS).
+model AppSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("app_settings")
+}

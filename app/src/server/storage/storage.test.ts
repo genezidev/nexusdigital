@@ -182,6 +182,16 @@ describe("token assinado (HMAC)", () => {
     expect(verifyToken(other, token, "download")).toEqual({ ok: false, reason: "BAD_SIGNATURE" });
   });
 
+  it("forma canonica: trocar so o ultimo caractere da assinatura (bits sem uso do base64url) nao vale, em nenhuma das 64 trocas", () => {
+    // Antes, 4 dos 64 caracteres finais decodificavam para os mesmos bytes e o token adulterado era aceito (flaky no teste de integracao).
+    const token = signToken(secret, claims);
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    for (const c of alphabet) {
+      const t = token.slice(0, -1) + c;
+      expect(verifyToken(secret, t, "download").ok, c).toBe(t === token);
+    }
+  });
+
   it("validade: confere pelo relogio informado (sem depender do relogio real)", () => {
     const at = (s: number) => new Date(s * 1000);
     expect(isExpired(claims, at(claims.expiresAt - 1))).toBe(false);

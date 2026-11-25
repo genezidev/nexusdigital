@@ -1,12 +1,14 @@
-import { resolveTenantContext, systemContextForMaintenance, type TenantContext } from "@/server/authorization/context";
+import { randomUUID } from "node:crypto";
+import { resolveTenantContext, systemContextForMaintenance, systemContextForStorageCapacity, type TenantContext } from "@/server/authorization/context";
 import { assertCan, isAgency } from "@/server/authorization/permissions";
 import { getServerEnv } from "@/server/config/env";
 import type { Db } from "@/server/db/client";
 import { withSystemScoped, withTenant } from "@/server/db/scope";
 import { checkAssetDeclaration, maxBytesFor, type AssetLimits } from "@/server/domain/asset-policy";
+import { assessOrphans, CleanupAbortedError, decideInstallBinding, resolveCleanupLimits, type CleanupLimits } from "@/server/domain/cleanup-policy";
 import { verifyUploadedType } from "@/server/domain/file-type";
-import { ConflictError, DomainRuleError, ForbiddenError, GoneError, NotFoundError, PayloadTooLargeError, TooManyRequestsError } from "@/server/errors";
-import { clientStorageBytes, countPendingUploads, getOwnUpload, insertPendingAsset, markAssetAvailable, markAssetDeleted, markAssetRejected } from "@/server/repositories/assets";
+import { ConflictError, DomainRuleError, ForbiddenError, GoneError, InsufficientStorageError, NotFoundError, PayloadTooLargeError, TooManyRequestsError } from "@/server/errors";
+import { clientStorageBytes, countPendingUploads, getOwnUpload, globalStorageBytes, insertPendingAsset, lockClientUploads, markAssetAvailable, markAssetDeleted, markAssetRejected } from "@/server/repositories/assets";
 import { recordAudit, recordSystemAudit } from "@/server/repositories/audit";
 import { authorizeDownload } from "@/server/services/assets";
 import { getStorage } from "@/server/storage";
@@ -29,6 +31,10 @@ export interface FileDeps {
   maxPendingPerUser: number;
   /** 0 = sem conferencia de cota. */
   clientQuotaBytes: number;
+  /** Teto da soma de TODOS os clientes (B-1 de M-B). 0 = sem teto. */
+  globalQuotaBytes: number;
+  /** Espaco livre que o volume precisa manter depois de aceitar o arquivo. 0 = sem conferencia. */
+  minFreeBytes: number;
   now: () => Date;
 }
 
@@ -42,12 +48,31 @@ export function fileDepsFromEnv(): FileDeps {
     downloadTtlSeconds: env.DOWNLOAD_URL_TTL_SECONDS,
     maxPendingPerUser: env.MAX_PENDING_UPLOADS_PER_USER,
     clientQuotaBytes: Math.floor(env.STORAGE_CLIENT_QUOTA_MB * MB),
+    globalQuotaBytes: Math.floor(env.STORAGE_GLOBAL_QUOTA_MB * MB),
+    minFreeBytes: Math.floor(env.STORAGE_MIN_FREE_MB * MB),
     now: () => new Date(),
   };
 }
 
 export const PENDING_MAX_AGE_HOURS = 24;
 const HOUR = 3600_000;
+const pendingSince = (now: Date) => new Date(now.getTime() - PENDING_MAX_AGE_HOURS * HOUR);
+
+/**
+ * Capacidade do SERVIDOR (507): teto global (soma de todos os clientes) e espaco livre minimo no volume. Nao e trava
+ * consultiva: entre dois pedidos paralelos de clientes diferentes pode passar um pouco do teto global (limite
+ * documentado em docs/armazenamento.md); o espaco livre e medido de verdade a cada envio.
+ */
+async function assertServerCapacity(db: Db, deps: FileDeps, incomingBytes: number, now: Date, excludeAssetId?: string): Promise<void> {
+  if (deps.globalQuotaBytes > 0) {
+    const used = await withSystemScoped(db, systemContextForStorageCapacity(), (s) => globalStorageBytes(s, pendingSince(now), excludeAssetId));
+    if (used + BigInt(incomingBytes) > BigInt(deps.globalQuotaBytes)) throw new InsufficientStorageError();
+  }
+  if (deps.minFreeBytes > 0) {
+    const free = await deps.storage.freeBytes();
+    if (free - incomingBytes < deps.minFreeBytes) throw new InsufficientStorageError();
+  }
+}
 
 // ---------- nome original: so exibicao; sem controle nem inversao de texto, ate 255 ----------
 
@@ -69,6 +94,7 @@ function refusalToError(code: string): never {
     TYPE_MISMATCH: "O conteudo do arquivo nao corresponde ao tipo informado.",
     EXTENSION_MISMATCH: "A extensao do arquivo nao corresponde ao conteudo.",
     SIZE_MISMATCH: "O tamanho recebido nao confere com o informado.",
+    STORAGE_QUOTA_EXCEEDED: "A cota de armazenamento deste cliente acabou.",
   };
   throw new DomainRuleError(code, messages[code] ?? "Arquivo recusado.");
 }
@@ -100,8 +126,11 @@ export async function requestUpload(db: Db, ctx: TenantContext, deps: FileDeps, 
   if (!check.ok) refusalToError(check.code);
   const now = deps.now();
   const maxBytes = maxBytesFor(declared.mimeType, deps.limits)!;
+  await assertServerCapacity(db, deps, declared.bytes, now);
   const asset = await withTenant(db, ctx, async (s) => {
-    const since = new Date(now.getTime() - PENDING_MAX_AGE_HOURS * HOUR);
+    // Trava por cliente: sem ela, N pedidos paralelos leem o mesmo "ainda cabe" e todos passam do limite e da cota.
+    await lockClientUploads(s);
+    const since = pendingSince(now);
     if ((await countPendingUploads(s, since)) >= deps.maxPendingPerUser) throw new TooManyRequestsError(60);
     if (deps.clientQuotaBytes > 0 && (await clientStorageBytes(s, since)) + BigInt(declared.bytes) > BigInt(deps.clientQuotaBytes)) {
       throw new DomainRuleError("STORAGE_QUOTA_EXCEEDED", "A cota de armazenamento deste cliente acabou.");
@@ -199,6 +228,13 @@ export async function receiveUpload(
     return reject(input.contentLength <= 0 ? "EMPTY" : "TOO_LARGE");
   }
   if (!input.body) return reject("EMPTY");
+  // Capacidade medida de novo AGORA (o pedido pode ter sido ha minutos): sem espaco, o alvo continua valendo para tentar depois.
+  try {
+    await assertServerCapacity(db, deps, maxBytes, deps.now(), asset.id);
+  } catch (error) {
+    await input.body.cancel().catch(() => undefined);
+    throw error;
+  }
 
   let stored;
   try {
@@ -224,8 +260,19 @@ export async function receiveUpload(
   const check = checkAssetDeclaration({ originalName: asset.originalName, mimeType: verdict.mime, bytes: stored.bytes }, deps.limits);
   if (!check.ok) return reject(check.code);
 
+  let overQuota = false;
   try {
     await withTenant(db, ctx, async (s) => {
+      // Rechecagem da cota na FINALIZACAO, sob a mesma trava do pedido: a cota pode ter diminuido, ou o cliente pode ter
+      // enchido o espaco por outro caminho, entre o pedido e o fim do envio.
+      await lockClientUploads(s);
+      if (deps.clientQuotaBytes > 0) {
+        const others = await clientStorageBytes(s, pendingSince(deps.now()), asset.id);
+        if (others + BigInt(stored.bytes) > BigInt(deps.clientQuotaBytes)) {
+          overQuota = true;
+          return;
+        }
+      }
       const count = await markAssetAvailable(s, asset.id, {
         mimeType: verdict.mime,
         category: check.category,
@@ -241,6 +288,7 @@ export async function receiveUpload(
     await deps.storage.delete(asset.storageKey).catch(() => undefined);
     throw error;
   }
+  if (overQuota) return reject("STORAGE_QUOTA_EXCEEDED");
   return { id: asset.id, status: "DISPONIVEL", bytes: stored.bytes, mimeType: verdict.mime, checksumSha256: stored.checksumSha256, replayed: false };
 }
 
@@ -254,7 +302,7 @@ export interface DownloadLink {
 /** Emite o link so depois de assertCan e de conferir que o arquivo e DISPONIVEL e visivel para esta pessoa neste cliente. */
 export async function requestDownload(db: Db, ctx: TenantContext, deps: FileDeps, assetId: string): Promise<DownloadLink> {
   assertCan(ctx, "asset:read");
-  await authorizeDownload(db, ctx, assetId); // 404 se nao existe, nao e do cliente, nao esta DISPONIVEL ou nao e visivel
+  await authorizeDownload(db, ctx, assetId, { audit: true }); // 404 se nao existe/nao e do cliente/nao DISPONIVEL/nao visivel; 423 em quarentena; grava `asset.download_link_issued`
   const expiresAt = Math.floor(deps.now().getTime() / 1000) + deps.downloadTtlSeconds;
   const token = signToken(deps.secret, { purpose: "download", assetId, clientId: ctx.clientId, userId: ctx.userId, expiresAt });
   return { path: `/api/files/download/${token}`, expiresAt: new Date(expiresAt * 1000).toISOString() };
@@ -299,24 +347,86 @@ export async function removeAsset(db: Db, ctx: TenantContext, deps: FileDeps, as
 export interface CleanupReport {
   pendingExpired: number;
   deletedObjectsRemoved: number;
-  orphanObjectsRemoved: number;
+  /** Objetos sem registro movidos para a lixeira (`.trash/`), de onde podem ser restaurados. */
+  orphanObjectsTrashed: number;
+  /** Objetos que ja estavam na lixeira ha mais que a retencao e foram apagados de verdade. */
+  trashPurged: number;
   tempRemoved: number;
 }
 
+export interface CleanupOptions extends Partial<CleanupLimits> {
+  now?: Date;
+  batch?: number;
+}
+
+// ---------- instalacao: banco e pasta precisam ser do MESMO sistema antes de qualquer limpeza (M-A) ----------
+
+const INSTALL_KEY = "installation_id";
+
+async function readDbInstallId(db: Db): Promise<string | null> {
+  const row = await withSystemScoped(db, systemContextForMaintenance(), (s) => s.tx.appSetting.findUnique({ where: { key: INSTALL_KEY }, select: { value: true } }));
+  return row?.value ?? null;
+}
+
+/** Confere o identificador do banco com o `.install-id` da pasta. Falta ou divergencia: CleanupAbortedError, nada e tocado. */
+export async function assertInstallationMatches(db: Db, storage: ObjectStorage): Promise<void> {
+  const decision = decideInstallBinding(await readDbInstallId(db), await storage.readInstallId(), false);
+  if (decision.action === "abort") throw new CleanupAbortedError(decision.code, decision.message);
+}
+
 /**
- * Limpeza idempotente (comando `scripts/limpar-arquivos.ts`, ver docs/armazenamento.md):
- * 1) PENDENTE com mais de 24 h vira EXCLUIDO (abandonado) e seu objeto sai;
+ * Vinculo EXPLICITO (so por pedido de quem opera, flag `--vincular-instalacao`): grava o identificador que falta,
+ * do lado que falta. Se os dois existem e diferem, recusa SEMPRE (sao instalacoes diferentes). Nunca e chamado
+ * por `cleanupFiles`: limpeza nunca cria identificador sozinha.
+ */
+export async function bindInstallation(db: Db, storage: ObjectStorage): Promise<"ok" | "file-created" | "database-created" | "both-created"> {
+  const decision = decideInstallBinding(await readDbInstallId(db), await storage.readInstallId(), true);
+  const addToDb = (id: string) => withSystemScoped(db, systemContextForMaintenance(), (s) => s.tx.appSetting.create({ data: { key: INSTALL_KEY, value: id } }));
+  switch (decision.action) {
+    case "ok":
+      return "ok";
+    case "abort":
+      throw new CleanupAbortedError(decision.code, decision.message);
+    case "write-file":
+      await storage.writeInstallId(decision.id);
+      return "file-created";
+    case "write-db":
+      await addToDb(decision.id);
+      return "database-created";
+    case "create-both": {
+      const id = randomUUID();
+      await addToDb(id);
+      await storage.writeInstallId(id);
+      return "both-created";
+    }
+  }
+}
+
+/** Devolve da lixeira para o lugar de origem (restauravel ate a retencao acabar). false se nao esta la. */
+export async function restoreTrashedObject(storage: ObjectStorage, key: string): Promise<boolean> {
+  return storage.restoreFromTrash(key);
+}
+
+/**
+ * Limpeza idempotente (comando `scripts/limpar-arquivos.ts`, ver docs/armazenamento.md). ANTES de qualquer coisa:
+ * opcoes validas (minimo 1 hora) e identificador da instalacao igual no banco e na pasta. Depois:
+ * 1) PENDENTE com mais de N h vira EXCLUIDO (abandonado) e seu objeto sai;
  * 2) EXCLUIDO ou REJEITADO recentes: garante que o objeto nao existe mais;
- * 3) objeto no disco sem registro (ou so com registro encerrado) e temporario de envio com mais de 24 h saem.
+ * 3) temporario de envio com mais de N h sai; objeto de arquivo ja EXCLUIDO/REJEITADO sai;
+ *    objeto SEM REGISTRO ("orfao") vai para a LIXEIRA (nao e apagado), e so se o numero de orfaos for plausivel:
+ *    acima do teto, da proporcao, ou com o banco sem nenhum arquivo DISPONIVEL, a limpeza aborta sem mover nada;
+ * 4) o que esta na lixeira ha mais que a retencao (padrao 30 dias) e apagado de verdade.
  * Nunca toca objeto de arquivo DISPONIVEL. Rodar duas vezes seguidas nao muda nada na segunda.
  */
-export async function cleanupFiles(db: Db, storage: ObjectStorage, opts: { now?: Date; maxAgeHours?: number; batch?: number } = {}): Promise<CleanupReport> {
+export async function cleanupFiles(db: Db, storage: ObjectStorage, opts: CleanupOptions = {}): Promise<CleanupReport> {
+  const limits = resolveCleanupLimits(opts, PENDING_MAX_AGE_HOURS);
+  await assertInstallationMatches(db, storage);
   const now = opts.now ?? new Date();
-  const olderThanMs = (opts.maxAgeHours ?? PENDING_MAX_AGE_HOURS) * HOUR;
+  const olderThanMs = limits.maxAgeHours * HOUR;
   const batch = Math.min(Math.max(opts.batch ?? 500, 1), 5000);
   const cutoff = new Date(now.getTime() - olderThanMs);
   const sys = systemContextForMaintenance();
-  const report: CleanupReport = { pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsRemoved: 0, tempRemoved: 0 };
+  const report: CleanupReport = { pendingExpired: 0, deletedObjectsRemoved: 0, orphanObjectsTrashed: 0, trashPurged: 0, tempRemoved: 0 };
 
   // 1) pendentes abandonados
   const stale = await withSystemScoped(db, sys, (s) =>
@@ -347,17 +457,44 @@ export async function cleanupFiles(db: Db, storage: ObjectStorage, opts: { now?:
     }
   }
 
-  // 3) orfaos e temporarios velhos
-  for await (const obj of storage.list({ olderThanMs, now })) {
+  // 3) temporarios velhos, objetos de arquivo encerrado e orfaos (sem registro). Orfao so e MOVIDO depois de a conta fechar.
+  const orphans: string[] = [];
+  let totalObjects = 0;
+  for await (const obj of storage.list({ olderThanMs: 0, now })) {
     if (obj.key.startsWith(".tmp/")) {
-      await storage.delete(obj.key);
-      report.tempRemoved += 1;
+      if (obj.modifiedAt.getTime() < cutoff.getTime()) {
+        await storage.delete(obj.key);
+        report.tempRemoved += 1;
+      }
       continue;
     }
+    totalObjects += 1;
+    if (obj.modifiedAt.getTime() >= cutoff.getTime()) continue; // recente: pode ser envio em andamento
     const row = await withSystemScoped(db, sys, (s) => s.tx.asset.findFirst({ where: { storageKey: obj.key }, select: { status: true } }));
-    if (!row || row.status === "EXCLUIDO" || row.status === "REJEITADO") {
+    if (!row) {
+      orphans.push(obj.key);
+      // Teto absoluto estourado: nao ha por que continuar listando; nada foi movido ate aqui.
+      if (orphans.length > limits.maxOrphans) break;
+    } else if (row.status === "EXCLUIDO" || row.status === "REJEITADO") {
       await storage.delete(obj.key);
-      report.orphanObjectsRemoved += 1;
+      report.deletedObjectsRemoved += 1;
+    }
+  }
+  if (orphans.length > 0) {
+    const availableInDb = await withSystemScoped(db, sys, (s) => s.tx.asset.count({ where: { status: "DISPONIVEL" } }));
+    const abort = assessOrphans({ totalObjects, orphans: orphans.length, availableInDb }, limits);
+    if (abort) throw abort;
+    for (const key of orphans) {
+      if (await storage.moveToTrash(key, now)) report.orphanObjectsTrashed += 1;
+    }
+  }
+
+  // 4) lixeira: so depois da retencao o objeto e apagado de verdade
+  const trashCutoff = now.getTime() - limits.trashRetentionDays * 24 * HOUR;
+  for await (const t of storage.listTrash()) {
+    if (t.trashedAt.getTime() < trashCutoff) {
+      await storage.deleteFromTrash(t.key);
+      report.trashPurged += 1;
     }
   }
   return report;
